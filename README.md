@@ -8,7 +8,7 @@
 
 This is client (coconut_crab_client) / server (coconut_crab_server) application built in Rust to simulate a ransomware attack.
 
-This software is indended for use in education only and should not be used for harm.
+**This software is indended for use in education only and should not be used for harm.**
 
 The following additional applications are included:
 
