@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "coconut_crab_client",
+    "coconut_crab_server",
+    "group_docx_tool",
+    "coconut_crab_base_drop",
+    "coconut_crab_lib", 
+    "coconut_crab_blue_drop",
+]
+resolver = "2"

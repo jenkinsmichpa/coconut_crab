@@ -1,0 +1,23 @@
+[package]
+name = "coconut_crab_server"
+version = "0.1.0"
+authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
+edition = "2021"
+description = "Simulated ransomware server for incident response testing"
+
+[dependencies]
+coconut_crab_lib = { path = "../coconut_crab_lib" }
+axum = "0.7.4"
+axum-embed = "0.1.0"
+axum-server = { version = "0.6.0", features = ["tls-rustls"] }
+csv = "1.3.0"
+env_logger = "0.11.3"
+hex = "0.4.3"
+log = "0.4.21"
+rand = "0.8.5"
+regex = "1.10.3"
+rsa = "0.9.6"
+rust-embed = { version = "8.3.0", features = ["compression"] }
+serde = { version = "1.0.197", features = ["derive"] }
+sha2 = "0.10.8"
+tokio = { version = "1.36.0", features = ["rt-multi-thread"] }

