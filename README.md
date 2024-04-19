@@ -116,7 +116,7 @@ verify_server | should the client validate HTTPS certificates
 analyze_mode | should files be logged instead of encrypted
 persist | should a registry startup entry be created
 avoid_hidden | should the client avoid hidden directories and files
-avoid_urls | should client avoid URLS that do not occur natively in Office files
+avoid_urls | should client avoid URLs that do not occur natively in Office files
 avoid_keywords | should client avoid keywords associated with canary files
 avoid_broken_images | should client avoid images that cannot be rendered correctly
 analyze_office_zip | should client analyze office and zip files for caneries
