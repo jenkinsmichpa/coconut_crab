@@ -236,10 +236,10 @@ cargo build --release --bin coconut_crab_server
 Compiled executable will be output to `target/release/coconut_crab_server`
 
 # Support
-If you have any issues with this application, feel free to reach out to [Michael Jenkins](jenkinsmichpa@gmail.com).
+If you have any issues with this application, feel free to reach out to [Michael Jenkins](jenkinsmichpa.com).
 
 # Authors and Acknowledgement
-This project was developed by [Michael Jenkins](mailto:jenkinsmichpa@gmail.com) with the help of [Samuel Ho](mailto:ho176@purdue.edu) for use in teaching Purdue CNIT 47000 - Incident Response Management.
+This project was developed by [Michael Jenkins](jenkinsmichpa.com) with the help of [Samuel Ho](mailto:ho176@purdue.edu) for use in teaching Purdue CNIT 47000 - Incident Response Management.
 
 # License
 This project is licensed with the MIT License.
