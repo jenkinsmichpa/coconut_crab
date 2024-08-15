@@ -1,4 +1,4 @@
-use image::{io::Reader as ImageReader, DynamicImage};
+use image::{ImageReader, DynamicImage};
 use std::{
     io::Cursor,
     path::PathBuf
