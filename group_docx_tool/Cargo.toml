@@ -1,0 +1,15 @@
+[package]
+name = "group_docx_tool"
+version = "0.1.0"
+authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
+edition = "2021"
+description = "Generates and verifies randomish docx files for given group numbers"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+docx-rust = "0.1.6"
+hex = "0.4.3"
+rand = { version = "0.8.5", features = ["small_rng"] }
+sha2 = "0.10.8"
+ureq = "2.9.6"

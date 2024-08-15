@@ -1,0 +1,14 @@
+[package]
+name = "coconut_crab_blue_drop"
+version = "0.1.0"
+authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
+edition = "2021"
+description = "Wrapper to perform AutoBlue exploit against given groups"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+env_logger = "0.11.3"
+coconut_crab_lib = { path = "../coconut_crab_lib" }
+log = "0.4.21"
+regex = "1.10.4"
