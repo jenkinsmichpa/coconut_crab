@@ -44,3 +44,8 @@ OriginalFilename = "coconut_crab_client.exe"
 FileDescription = "Pinch Pinch"
 ProductVersion = "1.0"
 LegalCopyright = "jenkinsmichpa"
+
+[profile.release]
+opt-level = 'z'
+lto = true
+codegen-units = 1
