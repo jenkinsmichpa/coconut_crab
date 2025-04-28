@@ -43,7 +43,6 @@ The client performs the following steps to encrypt a file:
 - Analyze mode to list files without encrypting them
 - Configurable victim GUI accepting code for decryption
 - Configurable TLS encryption in transit
-- Configurable web client backend
 - Configurable and easily modified to be flawed or generate artifacts for detection
 - Configurable allow and block lists
     - Filesystem paths
