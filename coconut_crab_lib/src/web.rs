@@ -126,12 +126,12 @@ pub mod validate {
         let hash = hasher.finalize();
         debug!("Created SHA256 proof bytes: {:?}", hash);
         debug!("SHA265 hex value: {}", encode(hash));
-        return encode(hash);
+        encode(hash)
     }
 
     pub fn check_proof(proof_source: &mut Vec<u8>, secret: &str, proof: &str) -> bool {
         let true_proof = create_proof(proof_source, secret);
-        return true_proof == proof;
+        true_proof == proof
     }
     
 }
@@ -171,7 +171,7 @@ mod reqwest_client {
                     error!("Failed to receive server response to GET: {:?}", response_result);
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
-                    retry_wait = retry_wait * 2;                  
+                    retry_wait *= 2;                  
                     continue;
                 },
             };
@@ -185,14 +185,14 @@ mod reqwest_client {
                     error!("Failed to parse bytes from response {}", content_result);
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
-                    retry_wait = retry_wait * 2;                  
+                    retry_wait *= 2;                  
                     continue;
                 }
             };
                         
             return Some(content);
         }
-        return None;
+        None
     }
     
     pub fn web_post_send_json_recv_text_reqwest<T: serde::Serialize>(url: &String, json: &T, verify_server: &bool, initial_retry_wait: &u64, retries: &u8) -> Option<String> {
@@ -208,7 +208,7 @@ mod reqwest_client {
                     error!("Failed to receive server response to JSON POST: {:?}", response_result);
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
-                    retry_wait = retry_wait * 2;
+                    retry_wait *= 2;
                     continue;
                 },
             };
@@ -222,14 +222,14 @@ mod reqwest_client {
                     error!("Failed to parse text from response {}", content_result);
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
-                    retry_wait = retry_wait * 2;                
+                    retry_wait *= 2;                
                     continue;
                 }
             };
 
             return Some(content);
         }
-        return None;
+        None
     }
 }
 
@@ -262,7 +262,7 @@ mod ureq_client {
             .build().expect("Failed to build TLS connector");
         }
 
-        return AgentBuilder::new().tls_connector(tls_connector.into()).build();
+        AgentBuilder::new().tls_connector(tls_connector.into()).build()
     }
 
     pub fn web_get_recv_bytes_ureq(url: &String, verify_server: &bool, initial_retry_wait: &u64, retries: &u8) -> Option<Vec<u8>> {
@@ -278,7 +278,7 @@ mod ureq_client {
                     error!("Failed to receive server response to GET: {:?}", response_result);
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
-                    retry_wait = retry_wait * 2;                
+                    retry_wait *= 2;                
                     continue;
                 },
             };
@@ -313,14 +313,14 @@ mod ureq_client {
                     debug!("Failed to read content bytes from response: {}", content_read_result);
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
-                    retry_wait = retry_wait * 2;                
+                    retry_wait *= 2;                
                     continue;
                 }
             }
 
             return Some(content);
         }
-        return None;
+        None
     }
 
     pub fn web_post_send_json_recv_text_ureq<T: serde::Serialize>(url: &String, json: &T, verify_server: &bool, initial_retry_wait: &u64, retries: &u8) -> Option<String> {
@@ -336,7 +336,7 @@ mod ureq_client {
                     error!("Failed to receive server response to POST: {:?}", response_result);
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
-                    retry_wait = retry_wait * 2;                
+                    retry_wait *= 2;                
                     continue;
                 },
             };
@@ -350,13 +350,13 @@ mod ureq_client {
                     debug!("Failed to read content text from response: {}", content_read_result);
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
-                    retry_wait = retry_wait * 2;                
+                    retry_wait *= 2;                
                     continue;
                 }
             };
 
             return Some(content);
         }
-        return None;
+        None
     }
 }

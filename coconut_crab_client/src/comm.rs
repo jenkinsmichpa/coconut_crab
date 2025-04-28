@@ -55,7 +55,7 @@ pub fn import_asym_pub_key(file_path: &PathBuf) -> RsaPublicKey {
     debug!("Read public key PEM data {}", pem);
     let public_key = RsaPublicKey::from_pkcs1_pem(&pem).expect("Failed to parse PEM public key");
     debug!("Parsed PEM to public key {:?}", public_key);
-    return public_key;
+    public_key
 }
 
 pub fn download_asym_pub_key(server_fqdn: &str, port: &u16, https: &bool, verify_server: &bool) -> RsaPublicKey {
@@ -66,7 +66,7 @@ pub fn download_asym_pub_key(server_fqdn: &str, port: &u16, https: &bool, verify
     debug!("Response content bytes: {:?}", content);
     let public_key = RsaPublicKey::from_pkcs1_pem(str::from_utf8(&content).expect("Failed to parse PEM key string")).expect("Failed to parse PEM key");
     debug!("Asymmetric public key downloaded: {:?}", public_key);
-    return public_key
+    public_key
 }
 
 pub fn register(server_fqdn: &str, port: &u16, status: &Status, secret: &str, https: &bool, verify_server: &bool) {
@@ -130,7 +130,7 @@ fn download_sym_key(server_fqdn: &str, port: &u16, status: &Status, code: &str, 
             return None
         }
     };
-    return Some(sym_key);
+    Some(sym_key)
 }
 
 pub fn get_sym_key(server_fqdn: &str, server_port: &u16, status: &Status, code: &str, preshared_secret: &str, https: &bool, verify_server: &bool) -> Option<[u8; 32]> {

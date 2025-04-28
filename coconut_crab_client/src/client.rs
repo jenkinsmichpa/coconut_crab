@@ -8,7 +8,7 @@ use crate::comm::register;
 use crate::status::{Status, import_status_csv, export_status_csv, create_status};
 
 pub fn initialize_client(exe_path_dir: &PathBuf, server_fqdn: &str, server_port: &u16, preshared_secret:&str, https: &bool, verify_server: &bool) -> Status {
-    let status = match import_status_csv(exe_path_dir) {
+    match import_status_csv(exe_path_dir) {
         Some(csv_result) =>  {
             debug!("Successully imported status: {:?}", csv_result);
             csv_result
@@ -21,8 +21,7 @@ pub fn initialize_client(exe_path_dir: &PathBuf, server_fqdn: &str, server_port:
             debug!("Created new status: {:?}", new_status);
             new_status
         },
-    };
-    status
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -60,15 +59,12 @@ pub fn get_thread_nums() -> ThreadNums {
     let num_decrypt_threads = (num_threads - num_walk_threads).max(1);
     debug!("Using {} decrypt threads", num_decrypt_threads);
 
-    let thread_nums = ThreadNums {
+    ThreadNums {
         walk_threads: num_walk_threads,
         shred_threads: num_shred_threads,
         encrypt_threads: num_encrypt_threads,
         decrypt_threads: num_decrypt_threads,
         canary_threads: num_canary_threads,
         encrypt_threads_canary: num_encrypt_threads_canary
-    };
-
-    thread_nums
-
+    }
 }

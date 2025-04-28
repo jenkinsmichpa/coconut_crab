@@ -202,12 +202,12 @@ fn analyze_file_data(file_data: &Vec<u8>, avoid_keywords: &bool, avoid_urls: &bo
             return true;
         }
     }
-    return false;
+    false
 }
 
 fn get_interesting_strings(file_data: &[u8]) -> Vec<String> {
     let file_data_utf8 = String::from_utf8_lossy(file_data);
-    return INTERESTING_STRING_REGEX.find_iter(&file_data_utf8).map(|regex_match| regex_match.as_str().to_string()).collect();
+    INTERESTING_STRING_REGEX.find_iter(&file_data_utf8).map(|regex_match| regex_match.as_str().to_string()).collect()
 }
 
 fn analyze_keywords(string: &str) -> bool {
@@ -219,7 +219,7 @@ fn analyze_keywords(string: &str) -> bool {
         }
     }
     debug!("String not flagged by analysis: {}", string);
-    return false;
+    false
 }
 
 fn analyze_urls(string: &str) -> bool {
@@ -230,7 +230,7 @@ fn analyze_urls(string: &str) -> bool {
         }
     }
     debug!("URL not flagged by analysis");
-    return false;
+    false
 }
 
 fn analyze_domain(domain: &str) -> bool {
@@ -239,7 +239,7 @@ fn analyze_domain(domain: &str) -> bool {
         return true
     }
     debug!("Domain is a known office document domain: {}", domain);
-    return false;
+    false
 }
 
 fn analyze_zip_file(file_path: &PathBuf, zipped_file_max_size: &u64, avoid_keywords: &bool, avoid_urls: &bool) -> Result<bool, ()> {
@@ -303,5 +303,5 @@ fn analyze_zip_file(file_path: &PathBuf, zipped_file_max_size: &u64, avoid_keywo
         }
     }
     debug!("Zip archive not flagged by analysis: {:?}", file_path);
-    return Ok(false);
+    Ok(false)
 }

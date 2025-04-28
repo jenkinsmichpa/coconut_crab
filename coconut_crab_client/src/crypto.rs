@@ -244,11 +244,11 @@ fn apply_chacha(source_file_path: &PathBuf, destination_file_path: &PathBuf, key
         match fs::write(destination_file_path, &some_source_file_data){
             Ok(_) => {
                 debug!("Successfuly wrote to file: {:?}", destination_file_path);
-                return Ok(())
+                Ok(())
             },
             Err(destination_write_result) => {
                 error!("Error writing to file: {:?}", destination_write_result);
-                return Err(destination_write_result)
+                Err(destination_write_result)
             }
         }
     } else {
@@ -309,7 +309,7 @@ fn apply_chacha(source_file_path: &PathBuf, destination_file_path: &PathBuf, key
                 }
             }
         }
-        return Ok(())
+        Ok(())
     }         
 }
 
@@ -360,7 +360,7 @@ pub fn decrypt_string(source_str: &str,  key: &[u8; 32], nonce_str: &str) -> Str
     debug!("Decrypting to string: {:?}", source_data);
     cipher.apply_keystream(&mut *source_data);
     debug!("String bytes: {:?}", source_data);
-    return match String::from_utf8(source_data) {
+    match String::from_utf8(source_data) {
         Ok(bytes_string_result) => {
             debug!("Successfully decoded bytes to string: {}", bytes_string_result);
             bytes_string_result
@@ -369,7 +369,7 @@ pub fn decrypt_string(source_str: &str,  key: &[u8; 32], nonce_str: &str) -> Str
             error!("Failed to decode bytes to string: {}", bytes_string_result);
             String::new()
         }
-    };
+    }
 }
 
 pub fn generate_sym_key(sym_key: &mut [u8; 32]) {

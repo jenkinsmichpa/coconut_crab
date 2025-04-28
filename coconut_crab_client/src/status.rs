@@ -32,7 +32,7 @@ pub fn import_status_csv(path: &PathBuf) -> Option<Status> {
         },
     };
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
-    let row = match reader.deserialize().nth(0) {
+    let row = match reader.deserialize().next() {
         Some(row_result) => {
             debug!("Parsing first row: {:?}", row_result);
             row_result
@@ -52,7 +52,7 @@ pub fn import_status_csv(path: &PathBuf) -> Option<Status> {
             return None;
         },
     };  
-    return Some(status);
+    Some(status)
 }
 
 pub fn export_status_csv(path: &PathBuf, status: &Status) {
@@ -73,7 +73,7 @@ pub fn create_status() -> Status {
         symmetrically_encrypted_id_nonce: String::new()
     };
     debug!("Created new status: {:?}", status);
-    return status;
+    status
 }
 
 fn get_hostname() -> String {
@@ -87,12 +87,12 @@ fn get_hostname() -> String {
             String::from("HostnameError")
         },
     };
-    return hostname;
+    hostname
 }
 
 fn get_id() -> String {
     let rng = StdRng::from_entropy();
     let id = rng.sample_iter(&Alphanumeric).take(16).map(char::from).collect();
     debug!("Created new ID: {}", id);
-    return id;
+    id
 }

