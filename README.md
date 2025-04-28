@@ -197,7 +197,7 @@ source $HOME/.cargo/env
 rustup target add x86_64-pc-windows-gnu
 ```
 
-### Compile Client on Windows
+### Compile Client on Windows for Windows
 
 ```powershell
 cargo build --release --bin coconut_crab_client
@@ -205,7 +205,7 @@ cargo build --release --bin coconut_crab_client
 
 Compiled executable will be output to `target/release/coconut_crab_client.exe`
 
-### Compile Server on Windows
+### Compile Server on Windows for Windows
 
 Copy compiled client executable to `coconut_crab_server/assets/public/coconut_crab_client.exe`
 
@@ -215,7 +215,7 @@ cargo build --release --bin coconut_crab_server
 
 Compiled executable will be output to `target/release/coconut_crab_server.exe`
 
-### Compile Client on Linux
+### Compile Client on Linux for Windows
 
 ```bash
 cargo build --release --target x86_64-pc-windows-gnu --bin coconut_crab_client
@@ -223,7 +223,7 @@ cargo build --release --target x86_64-pc-windows-gnu --bin coconut_crab_client
 
 Compiled executable will be output to `target/x86_64-pc-windows-gnu/release/coconut_crab_client.exe`
 
-### Compile Server on Linux
+### Compile Server on Linux for Linux
 
 Copy compiled client executable to `coconut_crab_server/assets/public/coconut_crab_client.exe`
 
