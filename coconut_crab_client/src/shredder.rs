@@ -6,23 +6,16 @@ use std::{
     sync::Arc
 };
 use crossbeam_channel::Receiver;
-use rand::{RngCore, SeedableRng, rngs::{SmallRng, ThreadRng}};
+use rand::{RngCore, SeedableRng, rngs::SmallRng};
 use log::{debug, error, info, warn};
 
 pub fn shred(r: Receiver<Arc<PathBuf>>) -> thread::JoinHandle<()> {
     
     debug!("Starting shredder thread");
     thread::spawn(move || {
-        let mut rng_cheap = match SmallRng::from_rng(ThreadRng::default()) {
-            Ok(rng_cheap_result) => {
-                debug!("Succcessfully created cheap random number generator: {:?}", rng_cheap_result);
-                rng_cheap_result
-            },
-            Err(rng_cheap_result) => {
-                error!("Failed to create cheap random number generator: {}", rng_cheap_result);
-                return
-            },
-        };
+        let mut rng_cheap = SmallRng::from_entropy();
+        debug!("Created cheap random number generator");
+
         loop {
             let file_path = match r.recv() {
                 Ok(file_path_result) => {

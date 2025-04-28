@@ -9,7 +9,7 @@ use walkdir::{WalkDir, DirEntry};
 use crossbeam_channel::Sender;
 use rand::{
     SeedableRng,
-    rngs::{SmallRng, ThreadRng},
+    rngs::SmallRng,
     seq::SliceRandom
 };
 use log::{debug, error};
@@ -96,16 +96,8 @@ pub fn random_walk(sender: Sender<Arc<PathBuf>>, allowlist_paths_arc: Arc<Vec<Pa
             }
         }
 
-        let mut rng_cheap = match SmallRng::from_rng(ThreadRng::default()) {
-            Ok(rng_cheap_result) => {
-                debug!("Succcessfully created cheap random number generator");
-                rng_cheap_result
-            },
-            Err(rng_cheap_result) => {
-                error!("Failed to create cheap random number generator: {}", rng_cheap_result);
-                return
-            },
-        };
+        let mut rng_cheap = SmallRng::from_entropy();
+        debug!("Created cheap random number generator");
 
         found_paths.shuffle(&mut rng_cheap);
 

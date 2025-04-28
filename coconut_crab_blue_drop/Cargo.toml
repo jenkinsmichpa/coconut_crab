@@ -12,3 +12,10 @@ env_logger = "0.11.3"
 coconut_crab_lib = { path = "../coconut_crab_lib" }
 log = "0.4.21"
 regex = "1.10.4"
+
+[profile.release]
+opt-level = 'z'
+lto = true
+codegen-units = 1
+panic = 'abort'
+strip = true

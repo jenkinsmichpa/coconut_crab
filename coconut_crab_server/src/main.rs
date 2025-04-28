@@ -193,10 +193,10 @@ fn get_victim<'a>(victims: &'a mut [Victim], id: &str) -> Option<&'a mut Victim>
 }
 
 fn generate_code() -> String {
-    let mut rng = StdRng::from_entropy();
+    let mut rng = StdRng::from_os_rng();
     let code: String = (0..4).map(|_| {
         (0..4).map(|_| {
-            let random_char = rng.gen_range(0..62);
+            let random_char = rng.random_range(0..62);
             if random_char < 10 {
                 (b'0' + random_char) as char
             } else if random_char < 36 {
