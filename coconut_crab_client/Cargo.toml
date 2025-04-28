@@ -11,7 +11,9 @@ coconut_crab_lib = { path = "../coconut_crab_lib" }
 auto-launch = "0.5.0"
 chacha20 = "0.9.1"
 hex = "0.4.3"
-rand = { version = "0.8.5", features = ["small_rng"] } # Needed for RSA create compatibility
+rand = { version = "0.8.5", features = [
+    "small_rng",
+] } # Needed for RSA create compatibility
 rsa = "0.9.6"
 walkdir = "2.4.0"
 zeroize = "1.7.0"
@@ -44,8 +46,3 @@ OriginalFilename = "coconut_crab_client.exe"
 FileDescription = "Pinch Pinch"
 ProductVersion = "1.0"
 LegalCopyright = "jenkinsmichpa"
-
-[profile.release]
-opt-level = 'z'
-lto = true
-codegen-units = 1

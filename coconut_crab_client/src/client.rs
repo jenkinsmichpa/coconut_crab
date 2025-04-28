@@ -1,18 +1,22 @@
-use std::{
-    path::Path,
-    thread::available_parallelism
-};
-use log::{debug, error, warn};
+use std::{ path::Path, thread::available_parallelism };
+use log::{ debug, error, warn };
 
 use crate::comm::register;
-use crate::status::{Status, import_status_csv, export_status_csv, create_status};
+use crate::status::{ Status, import_status_csv, export_status_csv, create_status };
 
-pub fn initialize_client(exe_path_dir: &Path, server_fqdn: &str, server_port: &u16, preshared_secret:&str, https: &bool, verify_server: &bool) -> Status {
+pub fn initialize_client(
+    exe_path_dir: &Path,
+    server_fqdn: &str,
+    server_port: &u16,
+    preshared_secret: &str,
+    https: &bool,
+    verify_server: &bool
+) -> Status {
     match import_status_csv(exe_path_dir) {
-        Some(csv_result) =>  {
+        Some(csv_result) => {
             debug!("Successully imported status: {:?}", csv_result);
             csv_result
-        },
+        }
         None => {
             warn!("Existing status not imported");
             let new_status = create_status();
@@ -20,7 +24,7 @@ pub fn initialize_client(exe_path_dir: &Path, server_fqdn: &str, server_port: &u
             export_status_csv(exe_path_dir, &new_status);
             debug!("Created new status: {:?}", new_status);
             new_status
-        },
+        }
     }
 }
 
@@ -31,7 +35,7 @@ pub struct ThreadNums {
     pub encrypt_threads: usize,
     pub decrypt_threads: usize,
     pub canary_threads: usize,
-    pub encrypt_threads_canary: usize
+    pub encrypt_threads_canary: usize,
 }
 
 pub fn get_thread_nums() -> ThreadNums {
@@ -39,18 +43,18 @@ pub fn get_thread_nums() -> ThreadNums {
         Ok(suggested_threads_result) => {
             debug!("Successfully got suggested number of threads: {}", suggested_threads_result);
             suggested_threads_result.get()
-        }, 
+        }
         Err(suggested_threads_result) => {
             error!("Failed to get suggested number of threads: {}", suggested_threads_result);
             1
-        },
+        }
     };
 
-    let num_walk_threads =  (num_threads / 6).max(1);
+    let num_walk_threads = (num_threads / 6).max(1);
     debug!("Using {} walk threads", num_walk_threads);
-    let num_shred_threads =  (num_threads / 6).max(1);
+    let num_shred_threads = (num_threads / 6).max(1);
     debug!("Using {} shred threads", num_shred_threads);
-    let num_canary_threads =  (num_threads / 6).max(1);
+    let num_canary_threads = (num_threads / 6).max(1);
     debug!("Using {} canary threads", num_canary_threads);
     let num_encrypt_threads = (num_threads - num_walk_threads - num_shred_threads).max(1);
     debug!("Using {} encrypt threads", num_encrypt_threads);
@@ -65,6 +69,6 @@ pub fn get_thread_nums() -> ThreadNums {
         encrypt_threads: num_encrypt_threads,
         decrypt_threads: num_decrypt_threads,
         canary_threads: num_canary_threads,
-        encrypt_threads_canary: num_encrypt_threads_canary
+        encrypt_threads_canary: num_encrypt_threads_canary,
     }
 }

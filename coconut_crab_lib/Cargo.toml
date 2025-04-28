@@ -5,12 +5,9 @@ authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
 edition = "2021"
 description = "Library for coconut_crab packages"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 serde = { version = "1.0.197", features = ["derive"] }
 regex = "1.10.3"
-reqwest = { version = "0.12.2", features = ["blocking", "json"] }
 log = "0.4"
 rust-embed = { version = "8.3.0", features = ["include-exclude"] }
 env_logger = "0.11.3"
@@ -19,10 +16,3 @@ ureq = { version = "3.0.11", features = ["json", "vendored"] }
 lazy_static = "1.4.0"
 hex = "0.4.3"
 sha2 = "0.10.8"
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = 'abort'
-strip = true

