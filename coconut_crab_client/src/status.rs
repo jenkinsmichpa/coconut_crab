@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    path::PathBuf
+    path::Path
 };
 use csv::{ReaderBuilder, WriterBuilder};
 use rand::{Rng, SeedableRng, rngs::StdRng, distributions::Alphanumeric};
@@ -20,7 +20,7 @@ pub struct Status {
 
 pub const STATUS_FILENAME: &str = "status.csv";
 
-pub fn import_status_csv(path: &PathBuf) -> Option<Status> {
+pub fn import_status_csv(path: &Path) -> Option<Status> {
     let file = match File::open(path.join(STATUS_FILENAME)) {
         Ok(file_result) => {
             info!("Existing CSV file found: {:?}", file_result);
@@ -55,7 +55,7 @@ pub fn import_status_csv(path: &PathBuf) -> Option<Status> {
     Some(status)
 }
 
-pub fn export_status_csv(path: &PathBuf, status: &Status) {
+pub fn export_status_csv(path: &Path, status: &Status) {
     let file = File::create(path.join(STATUS_FILENAME)).expect("Error accessing filesystem to write status CSV");
     let mut writer = WriterBuilder::new().has_headers(true).from_writer(file);
     writer.serialize(status).expect("Failed to serialize status");    

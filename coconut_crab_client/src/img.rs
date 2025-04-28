@@ -3,7 +3,6 @@ use std::{
     io::Cursor,
     path::PathBuf
 };
-use wallpaper;
 use log::{debug, error, info};
 use coconut_crab_lib::file::get_exe_path_dir;
 
@@ -29,11 +28,11 @@ pub fn get_icon() -> Option<DynamicImage> {
     match img_from_bytes(&icon_file.data) {
         Ok(icon_decode_result) => {
             debug!("Successfully got decoded icon");
-            return Some(icon_decode_result);
+            Some(icon_decode_result)
         },
         Err(_) => {
             error!("Failed to get decoded icon");
-            return None;
+            None
         }
     }
 }

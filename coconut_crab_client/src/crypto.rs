@@ -52,12 +52,12 @@ pub fn encrypt(r: Receiver<Arc<PathBuf>>,s: Sender<Arc<PathBuf>>, key: Arc<[u8; 
             let nonce;
             {
                 let mut nonce_guard = nonce_mutex.lock().expect("Mutex was poisoned");
-                nonce = nonce_guard.clone();
+                nonce = *nonce_guard;
                 debug!("Initial nonce: {:?}", nonce);
-                increment_nonce(&mut *nonce_guard);
+                increment_nonce(&mut nonce_guard);
                 debug!("Incremented nonce: {:?}", nonce);
             }
-            let nonce_file_extension = format!("{}.{}", encode(&nonce), encrypted_extension);
+            let nonce_file_extension = format!("{}.{}", encode(nonce), encrypted_extension);
             debug!("Nonce extension: {}", nonce_file_extension);
 
             let mut encrypted_file_path = file_path.as_ref().clone();
@@ -239,7 +239,7 @@ fn apply_chacha(source_file_path: &PathBuf, destination_file_path: &PathBuf, key
     
     if let Some(mut some_source_file_data) = source_file_data {
         debug!("File size is below threshold. Performing encryption with entire file in memory.");
-        cipher.apply_keystream(&mut *some_source_file_data);
+        cipher.apply_keystream(&mut some_source_file_data);
 
         match fs::write(destination_file_path, &some_source_file_data){
             Ok(_) => {
@@ -329,7 +329,7 @@ pub fn encrypt_string(source: &str,  key: &[u8; 32], nonce: &mut [u8; 12]) -> St
     debug!("Encrypting string: {}", source);
     let mut source_data = source.as_bytes().to_vec();
     debug!("String bytes: {:?}", source_data);
-    cipher.apply_keystream(&mut *source_data);
+    cipher.apply_keystream(&mut source_data);
     debug!("String encrypted: {:?}", encode(&source_data));
     increment_nonce(nonce);
     encode(source_data)
@@ -358,7 +358,7 @@ pub fn decrypt_string(source_str: &str,  key: &[u8; 32], nonce_str: &str) -> Str
     };
     let mut cipher = ChaCha20::new(key.into(), &nonce_data.into());   
     debug!("Decrypting to string: {:?}", source_data);
-    cipher.apply_keystream(&mut *source_data);
+    cipher.apply_keystream(&mut source_data);
     debug!("String bytes: {:?}", source_data);
     match String::from_utf8(source_data) {
         Ok(bytes_string_result) => {

@@ -172,7 +172,7 @@ fn import_csv<P: AsRef<FileSystemPath>>(file_path: P) -> Vec<Victim> {
     
 }
 
-fn export_csv<P: AsRef<FileSystemPath>>(file_path: P, victims: &Vec<Victim>) {
+fn export_csv<P: AsRef<FileSystemPath>>(file_path: P, victims: &[Victim]) {
     
     let file = File::create(file_path).expect("Error accessing filesystem for CSV");
     let mut writer = WriterBuilder::new().has_headers(true).from_writer(file);
@@ -184,7 +184,7 @@ fn export_csv<P: AsRef<FileSystemPath>>(file_path: P, victims: &Vec<Victim>) {
     writer.flush().expect("Failed to flush to file");
 }
 
-fn get_victim<'a>(victims: &'a mut Vec<Victim>, id: &str) -> Option<&'a mut Victim> {
+fn get_victim<'a>(victims: &'a mut [Victim], id: &str) -> Option<&'a mut Victim> {
     if let Some(existing_victim) = victims.iter_mut().find(|existing_victim| existing_victim.id == *id) {
         Some(existing_victim)
     } else {

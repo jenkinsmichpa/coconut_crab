@@ -1,5 +1,5 @@
 use std::{
-    path::PathBuf,
+    path::Path,
     thread::available_parallelism
 };
 use log::{debug, error, warn};
@@ -7,7 +7,7 @@ use log::{debug, error, warn};
 use crate::comm::register;
 use crate::status::{Status, import_status_csv, export_status_csv, create_status};
 
-pub fn initialize_client(exe_path_dir: &PathBuf, server_fqdn: &str, server_port: &u16, preshared_secret:&str, https: &bool, verify_server: &bool) -> Status {
+pub fn initialize_client(exe_path_dir: &Path, server_fqdn: &str, server_port: &u16, preshared_secret:&str, https: &bool, verify_server: &bool) -> Status {
     match import_status_csv(exe_path_dir) {
         Some(csv_result) =>  {
             debug!("Successully imported status: {:?}", csv_result);
@@ -16,7 +16,7 @@ pub fn initialize_client(exe_path_dir: &PathBuf, server_fqdn: &str, server_port:
         None => {
             warn!("Existing status not imported");
             let new_status = create_status();
-            register(&server_fqdn, server_port, &new_status, preshared_secret, https, verify_server);
+            register(server_fqdn, server_port, &new_status, preshared_secret, https, verify_server);
             export_status_csv(exe_path_dir, &new_status);
             debug!("Created new status: {:?}", new_status);
             new_status

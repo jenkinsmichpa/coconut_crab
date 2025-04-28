@@ -192,8 +192,8 @@ pub fn filter_canary(receiver: Receiver<Arc<PathBuf>>, sender: Sender<Arc<PathBu
     })
 }
 
-fn analyze_file_data(file_data: &Vec<u8>, avoid_keywords: &bool, avoid_urls: &bool) -> bool {
-    let interesting_strings = get_interesting_strings(&file_data);
+fn analyze_file_data(file_data: &[u8], avoid_keywords: &bool, avoid_urls: &bool) -> bool {
+    let interesting_strings = get_interesting_strings(file_data);
     for interesting_string in interesting_strings {
         if *avoid_keywords && analyze_keywords(&interesting_string) {
             return true;

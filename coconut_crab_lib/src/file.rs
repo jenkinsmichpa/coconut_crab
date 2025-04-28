@@ -35,7 +35,7 @@ pub fn get_file_size(path: &PathBuf) -> Result<u64, Error> {
 }
 
 pub fn get_file_data(file_path: &PathBuf, max_size: &u64) -> Result<Option<Vec<u8>>, Error> {
-    match get_file_size(&file_path) {
+    match get_file_size(file_path) {
         Ok(file_size_result) => {
             if file_size_result > *max_size {
                 warn!("File size ({}) exceeds max read size ({})", file_size_result, max_size);
