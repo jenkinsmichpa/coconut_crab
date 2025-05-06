@@ -6,12 +6,17 @@ export component Main inherits Window {
     in property <bool> status-progress: false;
     in-out property <string> code;
     in property <bool> code-valid: false;
-    out property <string> code-field-1;
-    out property <string> code-field-2;
-    out property <string> code-field-3;
-    out property <string> code-field-4;
-    callback enforce-code-field-format(string) -> string;
-    callback update-code();
+    out property <bool> code-segment-1-valid: false;
+    out property <bool> code-segment-2-valid: false;
+    out property <bool> code-segment-3-valid: false;
+    out property <bool> code-segment-4-valid: false;
+    out property <string> code-segment-1;
+    out property <string> code-segment-2;
+    out property <string> code-segment-3;
+    out property <string> code-segment-4;
+    callback enforce-code-segment-format(string) -> string;
+    callback check-code-segment-format(string) -> bool;
+    callback check-code();
     callback try-decrypt();
     always-on-top: true;
     title: "Coconut Crab";
@@ -77,9 +82,10 @@ export component Main inherits Window {
                     placeholder-text: "XXXX";
                     horizontal-alignment: center;
                     edited(text) => {
-                        self.text = enforce-code-field-format(text);
-                        code-field-1 = self.text;
-                        update-code();
+                        self.text = enforce-code-segment-format(text);
+                        code-segment-1 = self.text;
+                        code-segment-1-valid = check-code-segment-format(code-segment-1);
+                        check-code();
                     }
                 }
 
@@ -95,9 +101,10 @@ export component Main inherits Window {
                     placeholder-text: "XXXX";
                     horizontal-alignment: center;
                     edited(text) => {
-                        self.text = enforce-code-field-format(text);
-                        code-field-2 = self.text;
-                        update-code();
+                        self.text = enforce-code-segment-format(text);
+                        code-segment-2 = self.text;
+                        code-segment-2-valid = check-code-segment-format(code-segment-2);
+                        check-code();
                     }
                 }
 
@@ -113,9 +120,10 @@ export component Main inherits Window {
                     placeholder-text: "XXXX";
                     horizontal-alignment: center;
                     edited(text) => {
-                        self.text = enforce-code-field-format(text);
-                        code-field-3 = self.text;
-                        update-code();
+                        self.text = enforce-code-segment-format(text);
+                        code-segment-3 = self.text;
+                        code-segment-3-valid = check-code-segment-format(code-segment-3);
+                        check-code();
                     }
                 }
 
@@ -131,9 +139,10 @@ export component Main inherits Window {
                     placeholder-text: "XXXX";
                     horizontal-alignment: center;
                     edited(text) => {
-                        self.text = enforce-code-field-format(text);
-                        code-field-4 = self.text;
-                        update-code();
+                        self.text = enforce-code-segment-format(text);
+                        code-segment-4 = self.text;
+                        code-segment-4-valid = check-code-segment-format(code-segment-4);
+                        check-code();
                     }
                 }
             }

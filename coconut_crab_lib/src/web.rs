@@ -1,5 +1,5 @@
 pub mod structs {
-    use serde::{ Serialize, Deserialize };
+    use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct Registration {
@@ -30,7 +30,7 @@ pub mod structs {
 }
 
 pub mod client {
-    use crate::web::ureq_client::{ web_get_recv_bytes_ureq, web_post_send_json_recv_text_ureq };
+    use crate::web::ureq_client::{web_get_recv_bytes_ureq, web_post_send_json_recv_text_ureq};
 
     const RETRIES: u8 = 5;
     const INITIAL_RETRY_WAIT: u64 = 10;
@@ -42,7 +42,7 @@ pub mod client {
     pub fn web_post_send_json_recv_text<T: serde::Serialize>(
         url: &str,
         json: &T,
-        verify_server: &bool
+        verify_server: &bool,
     ) -> Option<String> {
         web_post_send_json_recv_text_ureq(url, json, verify_server, &INITIAL_RETRY_WAIT, &RETRIES)
     }
@@ -60,16 +60,22 @@ pub mod server_tls {
     struct AssetCertPriv;
 
     pub fn get_tls_public_key() -> Vec<u8> {
-        AssetCertPriv::get("cert.pem").expect("Failed to get public key file").data.to_vec()
+        AssetCertPriv::get("cert.pem")
+            .expect("Failed to get public key file")
+            .data
+            .to_vec()
     }
     pub fn get_tls_private_key() -> Vec<u8> {
-        AssetCertPriv::get("key.pem").expect("Failed to get private key file").data.to_vec()
+        AssetCertPriv::get("key.pem")
+            .expect("Failed to get private key file")
+            .data
+            .to_vec()
     }
 }
 
 pub mod client_tls {
-    use std::borrow::Cow;
     use rust_embed::RustEmbed;
+    use std::borrow::Cow;
     #[derive(RustEmbed)]
     #[folder = "assets/cert"]
     #[include = "ca-cert.pem"]
@@ -80,16 +86,18 @@ pub mod client_tls {
     struct AssetCertPub;
 
     pub fn get_ca_public_key() -> Cow<'static, [u8]> {
-        AssetCertPub::get("ca-cert.pem").expect("Failed to get public key file").data
+        AssetCertPub::get("ca-cert.pem")
+            .expect("Failed to get public key file")
+            .data
     }
 }
 
 pub mod validate {
-    use regex::Regex;
-    use lazy_static::lazy_static;
     use hex::encode;
-    use sha2::{ Sha256, Digest };
+    use lazy_static::lazy_static;
     use log::debug;
+    use regex::Regex;
+    use sha2::{Digest, Sha256};
 
     lazy_static! {
         static ref ID_REGEX: Regex = Regex::new(r"^[[:alnum:]]{16}$").expect("Invalid Regex");
@@ -97,9 +105,11 @@ pub mod validate {
             Regex::new(r"^[0-9A-Za-z.\-]{0,32}$").expect("Invalid Regex");
         static ref SHA265_REGEX: Regex = Regex::new(r"^[a-fA-F0-9]{64}$").expect("Invalid Regex");
         static ref KEY_REGEX: Regex = Regex::new(r"^[a-fA-F0-9]{32,8192}$").expect("Invalid Regex");
-        static ref CODE_REGEX: Regex = Regex::new(
-            r"^[[:alnum:]]{4}-[[:alnum:]]{4}-[[:alnum:]]{4}-[[:alnum:]]{4}$"
-        ).expect("Invalid Regex");
+        static ref CODE_REGEX: Regex =
+            Regex::new(r"^[[:alnum:]]{4}-[[:alnum:]]{4}-[[:alnum:]]{4}-[[:alnum:]]{4}$")
+                .expect("Invalid Regex");
+        static ref CODE_SEGMENT_REGEX: Regex =
+            Regex::new(r"^[[:alnum:]]{4}$").expect("Invalid Regex");
     }
 
     pub fn validate_id(id: &str) -> bool {
@@ -116,6 +126,10 @@ pub mod validate {
 
     pub fn validate_key(key: &str) -> bool {
         KEY_REGEX.is_match(key)
+    }
+
+    pub fn validate_code_segment(code_segment: &str) -> bool {
+        CODE_SEGMENT_REGEX.is_match(code_segment)
     }
 
     pub fn validate_code(code: &str) -> bool {
@@ -139,10 +153,13 @@ pub mod validate {
 }
 
 mod ureq_client {
-    use std::{ io::Read, time::Duration, thread::sleep };
-    use log::{ debug, error, warn };
+    use log::{debug, error, warn};
+    use std::{io::Read, thread::sleep, time::Duration};
 
-    use ureq::{ tls::{ TlsConfig, RootCerts, Certificate }, Agent };
+    use ureq::{
+        tls::{Certificate, RootCerts, TlsConfig},
+        Agent,
+    };
 
     use crate::web::client_tls::get_ca_public_key;
 
@@ -161,14 +178,17 @@ mod ureq_client {
             }
         };
 
-        Agent::config_builder().tls_config(tls_config).build().into()
+        Agent::config_builder()
+            .tls_config(tls_config)
+            .build()
+            .into()
     }
 
     pub fn web_get_recv_bytes_ureq(
         url: &str,
         verify_server: &bool,
         initial_retry_wait: &u64,
-        retries: &u8
+        retries: &u8,
     ) -> Option<Vec<u8>> {
         let mut retry_wait = *initial_retry_wait;
         let client = create_client_ureq(verify_server);
@@ -179,7 +199,10 @@ mod ureq_client {
                     response_result
                 }
                 Err(response_result) => {
-                    error!("Failed to receive server response to GET: {:?}", response_result);
+                    error!(
+                        "Failed to receive server response to GET: {:?}",
+                        response_result
+                    );
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
                     retry_wait *= 2;
@@ -189,27 +212,37 @@ mod ureq_client {
 
             let content_length;
             match response.headers().get("Content-Length") {
-                Some(content_length_header_result) => {
-                    match content_length_header_result.to_str() {
-                        Ok(content_length_header_string_result) => {
-                            debug!("Successfuly retrieved string of Content-Length header: {}", content_length_header_string_result);
-                            match content_length_header_string_result.parse() {
-                                Ok(content_length_result) => {
-                                    debug!("Successfuly parsed Content-Length header: {}", content_length_result);
-                                    content_length = content_length_result;
-                                }
-                                Err(content_length_result) => {
-                                    error!("Failed to parse Content-Length header: {}", content_length_result);
-                                    content_length = 1;
-                                }
+                Some(content_length_header_result) => match content_length_header_result.to_str() {
+                    Ok(content_length_header_string_result) => {
+                        debug!(
+                            "Successfuly retrieved string of Content-Length header: {}",
+                            content_length_header_string_result
+                        );
+                        match content_length_header_string_result.parse() {
+                            Ok(content_length_result) => {
+                                debug!(
+                                    "Successfuly parsed Content-Length header: {}",
+                                    content_length_result
+                                );
+                                content_length = content_length_result;
+                            }
+                            Err(content_length_result) => {
+                                error!(
+                                    "Failed to parse Content-Length header: {}",
+                                    content_length_result
+                                );
+                                content_length = 1;
                             }
                         }
-                        Err(content_length_header_string_result) => {
-                            error!("Failed to retrieve string of Content-Length header: {}", content_length_header_string_result);
-                            content_length = 1;
-                        }
                     }
-                }
+                    Err(content_length_header_string_result) => {
+                        error!(
+                            "Failed to retrieve string of Content-Length header: {}",
+                            content_length_header_string_result
+                        );
+                        content_length = 1;
+                    }
+                },
                 None => {
                     error!("Failed to get Content-Length header");
                     content_length = 1;
@@ -217,12 +250,23 @@ mod ureq_client {
             }
 
             let mut content = Vec::with_capacity(content_length);
-            match response.into_body().into_reader().take(10_000_000).read_to_end(&mut content) {
+            match response
+                .into_body()
+                .into_reader()
+                .take(10_000_000)
+                .read_to_end(&mut content)
+            {
                 Ok(content_read_result) => {
-                    debug!("Successfully read {} content bytes from response", content_read_result);
+                    debug!(
+                        "Successfully read {} content bytes from response",
+                        content_read_result
+                    );
                 }
                 Err(content_read_result) => {
-                    debug!("Failed to read content bytes from response: {}", content_read_result);
+                    debug!(
+                        "Failed to read content bytes from response: {}",
+                        content_read_result
+                    );
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
                     retry_wait *= 2;
@@ -240,7 +284,7 @@ mod ureq_client {
         json: &T,
         verify_server: &bool,
         initial_retry_wait: &u64,
-        retries: &u8
+        retries: &u8,
     ) -> Option<String> {
         let mut retry_wait = *initial_retry_wait;
         let client = create_client_ureq(verify_server);
@@ -251,7 +295,10 @@ mod ureq_client {
                     response_result
                 }
                 Err(response_result) => {
-                    error!("Failed to receive server response to POST: {:?}", response_result);
+                    error!(
+                        "Failed to receive server response to POST: {:?}",
+                        response_result
+                    );
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
                     retry_wait *= 2;
@@ -261,11 +308,17 @@ mod ureq_client {
 
             let content = match response.body_mut().read_to_string() {
                 Ok(content_read_result) => {
-                    debug!("Successfully read content text from response: {}", content_read_result);
+                    debug!(
+                        "Successfully read content text from response: {}",
+                        content_read_result
+                    );
                     content_read_result
                 }
                 Err(content_read_result) => {
-                    debug!("Failed to read content text from response: {}", content_read_result);
+                    debug!(
+                        "Failed to read content text from response: {}",
+                        content_read_result
+                    );
                     warn!("Sleeping for {} seconds before retrying", retry_wait);
                     sleep(Duration::from_secs(retry_wait));
                     retry_wait *= 2;
