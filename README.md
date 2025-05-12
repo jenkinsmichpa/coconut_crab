@@ -190,6 +190,7 @@ openssl rsa -pubin -in public.pem -RSAPublicKey_out -out public_pkcs1.pem -tradi
 ### Prepare Windows for Compilation
 
 1. Download and install [rustup](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
+2. Download and install [cmake](https://cmake.org/download/)
 
 ### Prepare Linux for Compilation
 
