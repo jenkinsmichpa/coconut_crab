@@ -1,13 +1,13 @@
-use slint::{ SharedPixelBuffer, Rgba8Pixel, Image, ComponentHandle };
-use log::{ debug, error };
+use log::{debug, error};
+use slint::{ComponentHandle, Image, Rgba8Pixel, SharedPixelBuffer};
 
-use coconut_crab_lib::web::validate::{validate_code_segment, validate_code};
 use crate::img::get_icon;
 use crate::Main;
+use coconut_crab_lib::web::validate::{validate_code, validate_code_segment};
 
 pub fn set_window_icon(ui: &Main) {
     let icon = match get_icon() {
-        Some(icon_file_result) => { icon_file_result }
+        Some(icon_file_result) => icon_file_result,
         None => {
             error!("Icon not avilable to set window icon");
             return;
@@ -17,10 +17,10 @@ pub fn set_window_icon(ui: &Main) {
     let image_buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
         window_icon.as_raw(),
         window_icon.width(),
-        window_icon.height()
+        window_icon.height(),
     );
     ui.set_window_icon(Image::from_rgba8(image_buffer));
-    debug!("Successfully set window icon");
+    debug!("SuccesFsfully set window icon");
 }
 
 pub fn callback_handler_init(ui: &Main) {
@@ -46,7 +46,11 @@ pub fn callback_handler_init(ui: &Main) {
     ui.on_check_code(move || {
         let ui = ui_handle.unwrap();
 
-        if ui.get_code_segment_1_valid() && ui.get_code_segment_2_valid() && ui.get_code_segment_3_valid() && ui.get_code_segment_4_valid() {
+        if ui.get_code_segment_1_valid()
+            && ui.get_code_segment_2_valid()
+            && ui.get_code_segment_3_valid()
+            && ui.get_code_segment_4_valid()
+        {
             debug!("All code segments are valid");
             let code = format!(
                 "{}-{}-{}-{}",

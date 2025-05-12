@@ -12,13 +12,12 @@ mod windows_resource {
 
     pub fn create_windows_resource() {
         let mut res = winres::WindowsResource::new();
-        res.set_language(
-            winapi::um::winnt::MAKELANGID(
-                winapi::um::winnt::LANG_ENGLISH,
-                winapi::um::winnt::SUBLANG_ENGLISH_US
-            )
-        );
+        res.set_language(winapi::um::winnt::MAKELANGID(
+            winapi::um::winnt::LANG_ENGLISH,
+            winapi::um::winnt::SUBLANG_ENGLISH_US,
+        ));
         res.set_icon("assets/img/favicon.ico");
-        res.compile().expect("Failed to build Windows resource file");
+        res.compile()
+            .expect("Failed to build Windows resource file");
     }
 }

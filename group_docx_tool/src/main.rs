@@ -1,9 +1,9 @@
-use sha2::{ Sha256, Digest };
+use docx_rust::{document::Paragraph, Docx, DocxFile};
 use hex::encode;
 use rand::seq::SliceRandom;
-use rand::{ SeedableRng, rngs::SmallRng };
+use rand::{rngs::SmallRng, SeedableRng};
+use sha2::{Digest, Sha256};
 use std::fs;
-use docx_rust::{ document::Paragraph, Docx, DocxFile };
 use ureq::get;
 
 /*
@@ -62,13 +62,11 @@ fn main() {
             let docx = DocxFile::from_file(&file_name).expect("Failed to get DOCX file");
 
             let file_content = match docx.parse() {
-                Ok(file_content_result) => { file_content_result.document.body.text() }
+                Ok(file_content_result) => file_content_result.document.body.text(),
                 Err(file_content_result) => {
                     println!(
                         "❌ File {} does not match {} ({:?})",
-                        file_name,
-                        hash,
-                        file_content_result
+                        file_name, hash, file_content_result
                     );
                     continue;
                 }
@@ -76,24 +74,22 @@ fn main() {
 
             let words: Vec<&str> = file_content.split_whitespace().collect();
             let random_words = match words.get(0..16) {
-                Some(random_words_result) => { random_words_result }
+                Some(random_words_result) => random_words_result,
                 None => {
                     println!(
                         "❌ File {} does not match {} (Unable to parse random word key)",
-                        file_name,
-                        hash
+                        file_name, hash
                     );
                     continue;
                 }
             };
 
             let hash_words = match words.get(16..) {
-                Some(hash_words_result) => { hash_words_result }
+                Some(hash_words_result) => hash_words_result,
                 None => {
                     println!(
                         "❌ File {} does not match {} (Unable to parse encoding words)",
-                        file_name,
-                        hash
+                        file_name, hash
                     );
                     continue;
                 }
@@ -102,13 +98,11 @@ fn main() {
             let mut word_hash = String::new();
             for hash_word in hash_words {
                 let index = match random_words.iter().position(|x| x == hash_word) {
-                    Some(index_result) => { index_result }
+                    Some(index_result) => index_result,
                     None => {
                         println!(
                             "❌ File {} does not match {} (Unable to decode word: {})",
-                            file_name,
-                            hash,
-                            hash_word
+                            file_name, hash, hash_word
                         );
                         continue;
                     }
@@ -118,7 +112,10 @@ fn main() {
             if hash == word_hash {
                 println!("✅ File {} matches {}", file_name, hash);
             } else {
-                println!("❌ File {} does not match {} ({})", file_name, hash, word_hash);
+                println!(
+                    "❌ File {} does not match {} ({})",
+                    file_name, hash, word_hash
+                );
             }
         } else {
             println!("File '{}' not found. Creating file...", file_name);
@@ -137,9 +134,8 @@ fn main() {
             for hex_char in hash.chars() {
                 let word = random_words
                     .get(
-                        u8
-                            ::from_str_radix(&hex_char.to_string(), 16)
-                            .expect("Failed to parse hex to byte") as usize
+                        u8::from_str_radix(&hex_char.to_string(), 16)
+                            .expect("Failed to parse hex to byte") as usize,
                     )
                     .expect("Failed to encode in random word");
                 file_content = format!("{} {}", file_content, word);
@@ -148,7 +144,8 @@ fn main() {
             let mut docx = Docx::default();
             let paragraph = Paragraph::default().push_text(file_content);
             docx.document.push(paragraph);
-            docx.write_file(&file_name).expect("Failed to write to file");
+            docx.write_file(&file_name)
+                .expect("Failed to write to file");
         }
     }
 }

@@ -37,6 +37,11 @@ The client performs the following steps to encrypt a file:
 3. Create a new encrypted file
 4. Overwrite and delete the existing plaintext file
 
+### Client GUI
+
+![Coconut Crab Client GUI](coconut_crab_client_gui.png "Coconut Crab Client GUI")
+
+
 ## Features
 
 - Does not run unless the server can be reached for sandboxing
@@ -159,12 +164,12 @@ HTTPS certificates are placed in the following paths:
 Example HTTPS certificate generation:
 
 ```bash
-openssl genpkey -algorithm RSA -out ca-key.pem
-openssl req -new -x509 -key ca-key.pem -out ca-cert.pem -days 3650 -subj "/C=US/ST=Indiana/L=West Lafayette/O=Purdue University/OU=CIT/OU=470/CN=CA"
-openssl genpkey -algorithm RSA -out key.pem
-openssl req -new -key key.pem -out server.csr -subj "/C=US/ST=Indiana/L=West Lafayette/O=Purdue University/OU=CIT/OU=470/CN=SERVER_FQDN"
-openssl x509 -req -in server.csr -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out cert.pem -days 3650 -sha256
+openssl req -x509 -newkey rsa:4096 -keyout ca-key.pem -out ca-cert.pem -sha256 -days 3650 -nodes -config ./ca-cert.cnf
+openssl req -newkey rsa:4096 -nodes -keyout key.pem -out server.csr -config ./cert.cnf
+openssl x509 -req -in server.csr -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out cert.pem -days 3650 -sha256 -extfile cert.ext
 ```
+- See `coconut_crab_lib/assets/cert/ca-cert.cnf`, `coconut_crab_lib/assets/cert/cert.ext`, and `coconut_crab_lib/assets/cert/cert.ext` for example configuration and extension files
+
 
 ### Configure Encryption Certificates
 

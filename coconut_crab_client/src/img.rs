@@ -1,7 +1,7 @@
-use image::{ ImageReader, DynamicImage };
-use std::{ io::Cursor, path::PathBuf };
-use log::{ debug, error, info };
 use coconut_crab_lib::file::get_exe_path_dir;
+use image::{DynamicImage, ImageReader};
+use log::{debug, error, info};
+use std::{io::Cursor, path::PathBuf};
 
 const ICON_FILENAME: &str = "favicon.ico";
 const ICON_WALLPAPER_FILENAME: &str = "wallpaper.png";
@@ -36,18 +36,16 @@ pub fn get_icon() -> Option<DynamicImage> {
 
 pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ()> {
     match ImageReader::new(Cursor::new(bytes)).with_guessed_format() {
-        Ok(icon_read_result) => {
-            match icon_read_result.decode() {
-                Ok(icon_decode_result) => {
-                    debug!("Successfully decoded image");
-                    Ok(icon_decode_result)
-                }
-                Err(icon_decode_result) => {
-                    error!("Failed to decode image: {}", icon_decode_result);
-                    Err(())
-                }
+        Ok(icon_read_result) => match icon_read_result.decode() {
+            Ok(icon_decode_result) => {
+                debug!("Successfully decoded image");
+                Ok(icon_decode_result)
             }
-        }
+            Err(icon_decode_result) => {
+                error!("Failed to decode image: {}", icon_decode_result);
+                Err(())
+            }
+        },
         Err(icon_read_result) => {
             error!("Failed to read image: {}", icon_read_result);
             Err(())
@@ -57,7 +55,7 @@ pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ()> {
 
 fn save_icon_to_disk(file_path: &PathBuf) {
     let icon = match get_icon() {
-        Some(icon_file_result) => { icon_file_result }
+        Some(icon_file_result) => icon_file_result,
         None => {
             error!("Icon not avilable to save to disk");
             return;

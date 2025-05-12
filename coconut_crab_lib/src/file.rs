@@ -1,11 +1,11 @@
+use log::{debug, error, info, warn};
 use std::{
-    fs::{ self, File },
-    io::{ Error, Write },
-    path::{ PathBuf, Path },
-    ffi::OsStr,
     env::current_exe,
+    ffi::OsStr,
+    fs::{self, File},
+    io::{Error, Write},
+    path::{Path, PathBuf},
 };
-use log::{ debug, error, warn, info };
 
 pub fn get_lowercase_extension(path: &PathBuf) -> String {
     let file_extension = match path.extension() {
@@ -24,7 +24,10 @@ pub fn get_lowercase_extension(path: &PathBuf) -> String {
 pub fn get_file_size(path: &PathBuf) -> Result<u64, Error> {
     match fs::metadata(path) {
         Ok(file_metadata_result) => {
-            debug!("Successfuly extracted file metadata: {:?}", file_metadata_result);
+            debug!(
+                "Successfuly extracted file metadata: {:?}",
+                file_metadata_result
+            );
             Ok(file_metadata_result.len())
         }
         Err(file_metadata_result) => {
@@ -38,7 +41,10 @@ pub fn get_file_data(file_path: &PathBuf, max_size: &u64) -> Result<Option<Vec<u
     match get_file_size(file_path) {
         Ok(file_size_result) => {
             if file_size_result > *max_size {
-                warn!("File size ({}) exceeds max read size ({})", file_size_result, max_size);
+                warn!(
+                    "File size ({}) exceeds max read size ({})",
+                    file_size_result, max_size
+                );
                 return Ok(None);
             }
         }

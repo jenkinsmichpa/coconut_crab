@@ -1,8 +1,8 @@
-use std::{ fs::File, path::Path };
-use csv::{ ReaderBuilder, WriterBuilder };
-use rand::{ Rng, SeedableRng, rngs::StdRng, distributions::Alphanumeric };
-use serde::{ Serialize, Deserialize };
-use log::{ debug, error, info };
+use csv::{ReaderBuilder, WriterBuilder};
+use log::{debug, error, info};
+use rand::{distributions::Alphanumeric, rngs::StdRng, Rng, SeedableRng};
+use serde::{Deserialize, Serialize};
+use std::{fs::File, path::Path};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Status {
@@ -53,11 +53,12 @@ pub fn import_status_csv(path: &Path) -> Option<Status> {
 }
 
 pub fn export_status_csv(path: &Path, status: &Status) {
-    let file = File::create(path.join(STATUS_FILENAME)).expect(
-        "Error accessing filesystem to write status CSV"
-    );
+    let file = File::create(path.join(STATUS_FILENAME))
+        .expect("Error accessing filesystem to write status CSV");
     let mut writer = WriterBuilder::new().has_headers(true).from_writer(file);
-    writer.serialize(status).expect("Failed to serialize status");
+    writer
+        .serialize(status)
+        .expect("Failed to serialize status");
     writer.flush().expect("Failed to flush status to file");
 }
 
@@ -91,7 +92,11 @@ fn get_hostname() -> String {
 
 fn get_id() -> String {
     let rng = StdRng::from_entropy();
-    let id = rng.sample_iter(&Alphanumeric).take(16).map(char::from).collect();
+    let id = rng
+        .sample_iter(&Alphanumeric)
+        .take(16)
+        .map(char::from)
+        .collect();
     debug!("Created new ID: {}", id);
     id
 }

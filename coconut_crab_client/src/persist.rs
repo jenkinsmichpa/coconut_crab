@@ -1,6 +1,6 @@
-use std::{ io, env };
 use auto_launch::AutoLaunch;
-use log::{ debug, error, log_enabled, info, Level };
+use log::{debug, error, info, log_enabled, Level};
+use std::{env, io};
 
 fn get_autolaunch() -> Result<AutoLaunch, io::Error> {
     let exe_path = match env::current_exe() {
@@ -39,9 +39,15 @@ pub fn start_persist() {
         match autolaunch.is_enabled() {
             Ok(enable_status_result) => {
                 if enable_status_result {
-                    info!("AutoLaunch successfully enabled. Status: {}", enable_status_result);
+                    info!(
+                        "AutoLaunch successfully enabled. Status: {}",
+                        enable_status_result
+                    );
                 } else {
-                    error!("Unable to enable AutoLaunch. Status: {}", enable_status_result);
+                    error!(
+                        "Unable to enable AutoLaunch. Status: {}",
+                        enable_status_result
+                    );
                 }
             }
             Err(enable_status_result) => {
@@ -70,9 +76,15 @@ pub fn stop_persist() {
         match autolaunch.is_enabled() {
             Ok(enable_status_result) => {
                 if enable_status_result {
-                    error!("Unable to disable AutoLaunch. Status: {}", enable_status_result);
+                    error!(
+                        "Unable to disable AutoLaunch. Status: {}",
+                        enable_status_result
+                    );
                 } else {
-                    info!("AutoLaunch successfully disabled. Status: {}", enable_status_result);
+                    info!(
+                        "AutoLaunch successfully disabled. Status: {}",
+                        enable_status_result
+                    );
                 }
             }
             Err(enable_status_result) => {

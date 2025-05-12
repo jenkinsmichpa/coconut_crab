@@ -1,7 +1,13 @@
-use std::{ fs::{ self, File }, io::{ Write, Seek, SeekFrom }, path::PathBuf, thread, sync::Arc };
 use crossbeam_channel::Receiver;
-use rand::{ RngCore, SeedableRng, rngs::SmallRng };
-use log::{ debug, error, info, warn };
+use log::{debug, error, info, warn};
+use rand::{rngs::SmallRng, RngCore, SeedableRng};
+use std::{
+    fs::{self, File},
+    io::{Seek, SeekFrom, Write},
+    path::PathBuf,
+    sync::Arc,
+    thread,
+};
 
 pub fn shred(r: Receiver<Arc<PathBuf>>) -> thread::JoinHandle<()> {
     debug!("Starting shredder thread");
@@ -16,7 +22,10 @@ pub fn shred(r: Receiver<Arc<PathBuf>>) -> thread::JoinHandle<()> {
                     file_path_result
                 }
                 Err(file_path_result) => {
-                    warn!("Error receiving file path over channel: {}", file_path_result);
+                    warn!(
+                        "Error receiving file path over channel: {}",
+                        file_path_result
+                    );
                     return;
                 }
             };
@@ -25,7 +34,10 @@ pub fn shred(r: Receiver<Arc<PathBuf>>) -> thread::JoinHandle<()> {
 
             let file_metadata = match fs::metadata(file_path.as_ref()) {
                 Ok(file_metadata_result) => {
-                    debug!("Successfuly extracted file metadata: {:?}", file_metadata_result);
+                    debug!(
+                        "Successfuly extracted file metadata: {:?}",
+                        file_metadata_result
+                    );
                     file_metadata_result
                 }
                 Err(file_metadata_result) => {

