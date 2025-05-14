@@ -13,7 +13,7 @@ chacha20 = "0.9.1"
 hex = "0.4.3"
 rand = { version = "0.8.5", features = [
     "small_rng",
-] } # Needed for RSA create compatibility
+] } # Version <0.9.0 is needed for RSA create compatibility
 rsa = "0.9.6"
 walkdir = "2.4.0"
 zeroize = "1.7.0"
