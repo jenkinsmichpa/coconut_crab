@@ -83,7 +83,7 @@ static BYPASS_CODE: &str = "2NSd-NRF3-qkB3-v6qP";
 
 */
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Debug)
