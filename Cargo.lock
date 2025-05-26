@@ -1898,9 +1898,9 @@ dependencies = [
 
 [[package]]
 name = "docx-rust"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6a8e9647d314f66d467a705715111d045955949b5dbcf2dc7aee89e078af83d"
+checksum = "75463cd42bd579fdf76cf10ff1c4fb5988568c726f8ed4c2ed3921ddb6ef5c89"
 dependencies = [
  "derive_more 0.99.20",
  "hard-xml",
