@@ -12,4 +12,4 @@ docx-rust = "0.1.10"
 hex = "0.4.3"
 rand = { version = "0.9.1", features = ["small_rng"] }
 sha2 = "0.10.9"
-ureq = "3.0.11"
+ureq = "3.0.12"
