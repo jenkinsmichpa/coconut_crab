@@ -7,7 +7,7 @@ description = "Library for coconut_crab packages"
 
 [dependencies]
 serde = { version = "1.0.197", features = ["derive"] }
-regex = "1.10.3"
+regex = "1.11.2"
 log = "0.4"
 rust-embed = { version = "8.7.2", features = ["include-exclude"] }
 env_logger = "0.11.3"
