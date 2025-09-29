@@ -6,7 +6,7 @@ edition = "2021"
 description = "Library for coconut_crab packages"
 
 [dependencies]
-serde = { version = "1.0.226", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
 regex = "1.11.2"
 log = "0.4"
 rust-embed = { version = "8.7.2", features = ["include-exclude"] }
