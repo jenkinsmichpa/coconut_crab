@@ -18,7 +18,7 @@ rand = "0.9.1"
 regex = "1.11.2"
 rsa = "0.9.6"
 rust-embed = { version = "8.7.2", features = ["compression"] }
-serde = { version = "1.0.226", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
 sha2 = "0.10.9"
 tokio = { version = "1.47.1", features = ["rt-multi-thread"] }
 rustls = { version = "0.23.32", features = ["aws-lc-rs"] }
