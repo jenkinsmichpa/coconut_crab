@@ -9,11 +9,11 @@ description = "Library for coconut_crab packages"
 serde = { version = "1.0.228", features = ["derive"] }
 regex = "1.12.2"
 log = "0.4"
-rust-embed = { version = "8.7.2", features = ["include-exclude"] }
+rust-embed = { version = "8.8.0", features = ["include-exclude"] }
 env_logger = "0.11.3"
 native-tls = "0.2.11"
 ureq = { version = "3.1.2", features = ["json", "vendored"] }
 lazy_static = "1.4.0"
 hex = "0.4.3"
 sha2 = "0.10.9"
-rustls = { version = "0.23.32", features = ["aws-lc-rs"] }
+rustls = { version = "0.23.33", features = ["aws-lc-rs"] }
