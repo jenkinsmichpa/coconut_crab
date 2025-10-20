@@ -16,4 +16,4 @@ ureq = { version = "3.1.2", features = ["json", "vendored"] }
 lazy_static = "1.4.0"
 hex = "0.4.3"
 sha2 = "0.10.9"
-rustls = { version = "0.23.32", features = ["aws-lc-rs"] }
+rustls = { version = "0.23.33", features = ["aws-lc-rs"] }
