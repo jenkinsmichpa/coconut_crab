@@ -26,7 +26,7 @@ embed-manifest = "1.4.0"
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 crossbeam-channel = "0.5.15"
 log = { version = "0.4" }
-rust-embed = { version = "8.8.0", features = ["compression"] }
+rust-embed = { version = "8.9.0", features = ["compression"] }
 slint = "1.5.0"
 image = "0.25.8"
 env_logger = "0.11.3"
