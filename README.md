@@ -102,7 +102,7 @@ As this is an application for education and not real-world use, there were sever
 
 ### Client Configuration
 
-Client configuration variables are at the top of `coconut_crab_client/src/main.us`
+Client configuration variables are at the top of `coconut_crab_client/src/main.rs`
 
 Variable | Summary
 --- | ---
