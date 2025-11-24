@@ -28,7 +28,7 @@ crossbeam-channel = "0.5.15"
 log = { version = "0.4" }
 rust-embed = { version = "8.9.0", features = ["compression"] }
 slint = "1.5.0"
-image = "0.25.8"
+image = "0.25.9"
 env_logger = "0.11.3"
 regex = "1.12.2"
 lazy_static = "1.4.0"
