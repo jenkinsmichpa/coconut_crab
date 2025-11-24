@@ -16,7 +16,7 @@ hex = "0.4.3"
 log = "0.4.28"
 rand = "0.9.1"
 regex = "1.12.2"
-rsa = "0.9.6"
+rsa = "0.9.9"
 rust-embed = { version = "8.9.0", features = ["compression"] }
 serde = { version = "1.0.228", features = ["derive"] }
 sha2 = "0.10.9"
