@@ -2,7 +2,7 @@
 name = "coconut_crab_blue_drop"
 version = "0.1.0"
 authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
-edition = "2021"
+edition = "2024"
 description = "Wrapper to perform AutoBlue exploit against given groups"
 
 [dependencies]

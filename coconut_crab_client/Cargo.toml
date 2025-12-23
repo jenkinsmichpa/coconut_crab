@@ -2,7 +2,7 @@
 name = "coconut_crab_client"
 version = "0.1.0"
 authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
-edition = "2021"
+edition = "2024"
 build = "build.rs"
 description = "Simulated ransomware client for incident response testing"
 
