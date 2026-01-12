@@ -8,7 +8,7 @@ description = "Simulated ransomware client for incident response testing"
 
 [dependencies]
 coconut_crab_lib = { path = "../coconut_crab_lib" }
-auto-launch = "0.5.0"
+auto-launch = "0.6.0"
 chacha20 = "0.9.1"
 hex = "0.4.3"
 rand = { version = "0.8.5", features = [
