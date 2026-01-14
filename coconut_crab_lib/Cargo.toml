@@ -8,11 +8,11 @@ description = "Library for coconut_crab packages"
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
 regex = "1.12.2"
-log = "0.4"
-rust-embed = { version = "8.9.0", features = ["include-exclude"] }
-env_logger = "0.11.3"
+log = "0.4.29"
+rust-embed = { version = "8.10.0", features = ["include-exclude"] }
+env_logger = "0.11.8"
 ureq = { version = "3.1.4", features = ["json", "vendored"] }
-lazy_static = "1.4.0"
+lazy_static = "1.5.0"
 hex = "0.4.3"
 sha2 = "0.10.9"
 rustls = { version = "0.23.36", features = ["aws-lc-rs"] }

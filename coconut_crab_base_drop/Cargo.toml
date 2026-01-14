@@ -7,5 +7,5 @@ description = "Downloads and executes coconut_crab_client from coconut_crab_serv
 
 [dependencies]
 coconut_crab_lib = { path = "../coconut_crab_lib" }
-env_logger = "0.11.3"
+env_logger = "0.11.8"
 log = "0.4.29"

@@ -1,4 +1,4 @@
-use auto_launch::AutoLaunch;
+use auto_launch::{AutoLaunch, AutoLaunchBuilder};
 use log::{debug, error, info, log_enabled, Level};
 use std::{env, io};
 
@@ -14,8 +14,24 @@ fn get_autolaunch() -> Result<AutoLaunch, io::Error> {
         }
     };
     let app_name = "Coconut Crab";
-    let autolaunch = AutoLaunch::new(app_name, &exe_path, &[] as &[&str]);
-    debug!("Successfully created AutoLaunch: {:?}", autolaunch);
+    let autolaunch = match AutoLaunchBuilder::new()
+        .set_app_name(app_name)
+        .set_app_path(&exe_path)
+        .set_args(&[] as &[&str])
+        .build()
+    {
+        Ok(autolaunch_result) => {
+            debug!("Successfully created AutoLaunch: {:?}", autolaunch_result);
+            autolaunch_result
+        }
+        Err(autolaunch_result) => {
+            error!("Failed to create AutoLaunch: {}", autolaunch_result);
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                autolaunch_result.to_string(),
+            ));
+        }
+    };
     Ok(autolaunch)
 }
 
