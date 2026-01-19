@@ -17,7 +17,7 @@ log = "0.4.29"
 rand = "0.9.2"
 regex = "1.12.2"
 rsa = "0.9.10"
-rust-embed = { version = "8.10.0", features = ["compression"] }
+rust-embed = { version = "8.11.0", features = ["compression"] }
 serde = { version = "1.0.228", features = ["derive"] }
 sha2 = "0.10.9"
 tokio = { version = "1.49.0", features = ["rt-multi-thread"] }
