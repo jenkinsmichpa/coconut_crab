@@ -1809,15 +1809,15 @@ dependencies = [
 
 [[package]]
 name = "docx-rust"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75463cd42bd579fdf76cf10ff1c4fb5988568c726f8ed4c2ed3921ddb6ef5c89"
+checksum = "384002ebe1137c2602121f43e7c1329b88cb5d78074e4a13b041db360b4e57f1"
 dependencies = [
  "derive_more 0.99.20",
  "hard-xml",
  "log",
  "thiserror 1.0.69",
- "zip 1.1.4",
+ "zip 4.6.1",
 ]
 
 [[package]]
@@ -7959,18 +7959,16 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "1.1.4"
+version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cc23c04387f4da0374be4533ad1208cbb091d5c11d070dfef13676ad6497164"
+checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
 dependencies = [
  "arbitrary",
  "crc32fast",
- "crossbeam-utils",
- "displaydoc",
  "flate2",
  "indexmap",
- "num_enum",
- "thiserror 1.0.69",
+ "memchr",
+ "zopfli",
 ]
 
 [[package]]
