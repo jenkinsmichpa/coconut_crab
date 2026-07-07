@@ -4,6 +4,11 @@ version = "0.1.0"
 authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
 edition = "2024"
 description = "Simulated ransomware server for incident response testing"
+license = "MIT"
+repository = "https://github.com/jenkinsmichpa/coconut_crab"
+readme = "../README.md"
+keywords = ["ransomware", "simulation", "incident-response", "education", "security"]
+categories = ["simulation", "security"]
 
 [dependencies]
 coconut_crab_lib = { path = "../coconut_crab_lib" }

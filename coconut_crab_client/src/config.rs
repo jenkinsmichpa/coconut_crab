@@ -31,7 +31,7 @@ pub static ALLOWLIST_EXTENSIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
         "mp4", "mp3", "vmdk", "ova", "ovf", "vmx", "qcow", "iso", "gif", "aac", "pl", "7z", "rar",
         "m4a", "wma", "avi", "wmv", "d3dbsp", "sc2save", "sie", "sum", "bkp", "flv", "js", "raw",
         "jpeg", "tar", "zip", "gz", "cmd", "key", "dot", "docm", "txt", "doc", "docx", "xls",
-        "xlsx", "ppt", "pptx", "odt", "jpg", "png", "csv", "sql", "mdb", "sln", "php", "asp",
+        "xlsx", "ppt", "pptx", "odt", "jpg", "png", "csv", "sql", "sln", "php", "asp",
         "aspx", "html", "xml", "psd", "bmp", "pdf", "py", "rtf", "heic", "webp", "mov",
     ]
 });

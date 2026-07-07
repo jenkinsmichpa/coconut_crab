@@ -3,7 +3,7 @@ use std::{path::Path, thread::available_parallelism};
 
 use crate::{
     comm::register,
-    status::{Status, create_status, export_status_csv, import_status_csv},
+    status::{create_status, export_status_csv, import_status_csv, Status},
 };
 
 pub fn initialize_client(
@@ -25,7 +25,8 @@ pub fn initialize_client(
                 preshared_secret,
                 https,
                 verify_server,
-            );
+            )
+            .expect("Failed to register with server - cannot continue");
             export_status_csv(exe_path_dir, &new_status);
             debug!("Created new status: {new_status:?}");
             new_status
@@ -59,7 +60,11 @@ pub fn get_thread_nums() -> ThreadNums {
         }
     };
 
-    let num_walk_threads = 1; // zlob handles its own parallelism
+    let num_walk_threads = if num_threads >= 4 {
+        (num_threads / 4).max(2)
+    } else {
+        1
+    };
     let num_canary_threads = (num_threads / 6).max(1);
     let num_shred_threads = (num_threads / 6).max(1);
     let remaining = num_threads

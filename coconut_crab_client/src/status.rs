@@ -38,7 +38,7 @@ pub fn import_status_csv(path: &Path) -> Option<Status> {
     };
     let status = match row {
         Ok(parsed) => {
-            debug!("Successfuly parsed row to status: {parsed:?}");
+            debug!("Successfully parsed row to status: {parsed:?}");
             parsed
         }
         Err(error) => {

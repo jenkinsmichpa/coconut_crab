@@ -11,16 +11,13 @@ use zlob::walk::{WalkBuilder, WalkFlags, WalkState};
 use crate::{config, status::STATUS_FILENAME};
 use coconut_crab_lib::file::get_lowercase_extension;
 
-pub fn walk(sender: Sender<Arc<PathBuf>>) -> thread::JoinHandle<()> {
-    walk_with_exts(sender, None, None)
-}
-
 pub fn walk_with_exts(
     sender: Sender<Arc<PathBuf>>,
     allow_exts: Option<Vec<String>>,
     block_exts: Option<Vec<String>>,
+    threads: usize,
 ) -> thread::JoinHandle<()> {
-    debug!("Starting walk thread");
+    debug!("Starting walk thread with {threads} zlob workers");
     thread::spawn(move || {
         let allow_exts = allow_exts
             .as_deref()
@@ -42,17 +39,20 @@ pub fn walk_with_exts(
                 }
             };
 
-            let mut flags = WalkFlags::FOLLOW_SYMLINKS;
+            let mut flags = WalkFlags::empty();
             if config::AVOID_HIDDEN {
                 flags |= WalkFlags::SKIP_HIDDEN;
                 debug!("Hidden files/dirs will be skipped");
             }
             debug!("Walk flags set: {flags:?}");
             builder.options(flags);
-            builder.threads(1);
+            builder.threads(threads);
 
-            debug!("Starting zlob walk for: {}", starting_path.display());
-            if let Err(error) = builder.run_serial(|entry| {
+            debug!(
+                "Starting zlob walk for: {} with {threads} worker threads",
+                starting_path.display()
+            );
+            if let Err(error) = builder.run(|entry| {
                 if entry.is_file() {
                     let entry_path = entry.path().to_path_buf();
 
@@ -63,7 +63,7 @@ pub fn walk_with_exts(
                         return WalkState::Continue;
                     }
 
-                    if file_filter(&entry_path, allow_exts, block_exts, &entry_path) {
+                    if file_filter(&entry_path, allow_exts, block_exts) {
                         debug!("Entry matched filter: {}", entry_path.display());
                         if let Err(error) = sender.send(Arc::new(entry_path)) {
                             error!("Failed to send path to crypto/analysis/canary thread: {error}");
@@ -80,16 +80,13 @@ pub fn walk_with_exts(
     })
 }
 
-pub fn random_walk(sender: Sender<Arc<PathBuf>>) -> thread::JoinHandle<()> {
-    random_walk_with_exts(sender, None, None)
-}
-
 pub fn random_walk_with_exts(
     sender: Sender<Arc<PathBuf>>,
     allow_exts: Option<Vec<String>>,
     block_exts: Option<Vec<String>>,
+    threads: usize,
 ) -> thread::JoinHandle<()> {
-    debug!("Starting random walk thread");
+    debug!("Starting random walk thread with {threads} zlob workers");
     thread::spawn(move || {
         let allow_exts = allow_exts
             .as_deref()
@@ -112,15 +109,18 @@ pub fn random_walk_with_exts(
                 }
             };
 
-            let mut flags = WalkFlags::FOLLOW_SYMLINKS;
+            let mut flags = WalkFlags::empty();
             if config::AVOID_HIDDEN {
                 flags |= WalkFlags::SKIP_HIDDEN;
                 debug!("Hidden files/dirs will be skipped");
             }
             builder.options(flags);
-            builder.threads(1);
+            builder.threads(threads);
 
-            debug!("Starting zlob collect for: {}", starting_path.display());
+            debug!(
+                "Starting zlob collect for: {} with {threads} worker threads",
+                starting_path.display()
+            );
             let results = match builder.collect() {
                 Ok(results) => results,
                 Err(error) => {
@@ -146,7 +146,7 @@ pub fn random_walk_with_exts(
                         continue;
                     }
 
-                    if file_filter(&entry_path, allow_exts, block_exts, &entry_path) {
+                    if file_filter(&entry_path, allow_exts, block_exts) {
                         debug!("Entry matched filter: {}", entry_path.display());
                         found_paths.push(entry_path);
                     } else {
@@ -177,7 +177,6 @@ fn file_filter(
     file_path: &Path,
     allowlist_extensions: Option<&[String]>,
     blocklist_extensions: Option<&[String]>,
-    _entry_path: &Path,
 ) -> bool {
     let mut file_match = true;
 

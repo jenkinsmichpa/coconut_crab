@@ -13,7 +13,6 @@ This is client (coconut_crab_client) / server (coconut_crab_server) application 
 The following additional applications are included:
 
 - **group_docx_tool** - A tool to create and verify the authenticity of previously created DOCX files for groups
-  - **group_docx_drop** - An accompanying bash script to copy DOCX files to the DC shares of their associated groups **(untested)**
 
 ### Communication
 
@@ -65,7 +64,7 @@ The client performs the following steps to encrypt a file:
     - Including the client EXE served by the server
 - All persistent application information is stored in a CSV for simple viewing and modification
 - Configurable setting of desktop wallpaper
-- High-performance filesystem walking via zlob (SIMD-optimized, multicore, platform-optimized syscalls)
+- Parallel optimized filesystem walking via zlob
 - Reaps benefits being written in Rust including
   - AV doesn't work on it as well
   - Speed
@@ -73,8 +72,7 @@ The client performs the following steps to encrypt a file:
     - Multithreaded pipeline for the client
     - Asynchronous design for the server
   - Memory safe / no garbage collection
-  - Cross-platform-ish
-  - Implements standard / reviewed cryptography crates (RSA and ChaCha20)
+  - Cross-platform
 
 ## Considerations
 
@@ -82,10 +80,10 @@ As this is an application for education and not real-world use, there were sever
 
 - A baked in secret is used for request validation and is shared by every client
   - As a mitigation, the secret is obfuscated using litcrypt
-- Every request sent to the server is SHA265 hashed combined with the secret for validation
+- Every request sent to the server is HMAC-SHA256 keyed with the secret for validation
   - The server is easy to DoS as it does not implement a rate limit
   - The server is not resistant to replay attacks
-- By default, the application is configured to use publicaly known RSA key pairs for encryption
+- By default, the application is configured to use publicly known RSA key pairs for encryption
   - These can be changed before compilation
 - By default, the application is configured not to validate HTTPS certificates to allow the use of self-signed certificates
   - Validation can be enabled through the configuration
@@ -143,7 +141,8 @@ Server configuration variables are in `coconut_crab_server/src/config.rs`
 Variable | Summary
 --- | ---
 PORT | web server port (must match client)
-RECOVERY_WINDOW | time period that a symmetric key can be recovered if lost by client
+HTTPS | whether the web server should use HTTP or HTTPS with TLS
+RECOVERY_WINDOW_SECONDS | time period that a symmetric key can be recovered if lost by client
 PRESHARED_SECRET | code used to validate web requests (must match client)
 BYPASS_CODE | code used to unlock decryption on any victim
 
@@ -171,7 +170,7 @@ openssl req -newkey rsa:4096 -nodes -keyout key.pem -out server.csr -config ./ce
 openssl x509 -req -in server.csr -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out cert.pem -days 3650 -sha256 -extfile cert.ext
 ```
 
-- See `coconut_crab_lib/assets/cert/ca-cert.cnf`, `coconut_crab_lib/assets/cert/cert.ext`, and `coconut_crab_lib/assets/cert/cert.ext` for example configuration and extension files
+- See `coconut_crab_lib/assets/cert/ca-cert.cnf`, `coconut_crab_lib/assets/cert/cert.cnf`, and `coconut_crab_lib/assets/cert/cert.ext` for example configuration and extension files
 
 ### Configure Encryption Certificates
 
@@ -189,13 +188,13 @@ openssl rsa -in private.pem -out private_pkcs1.pem -traditional
 openssl rsa -pubin -in public.pem -RSAPublicKey_out -out public_pkcs1.pem -traditional
 ```
 
-### Prepare Windows for Compilation
+### Setup Windows for Compilation
 
 1. Download and install [rustup](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
 2. Download and install [cmake](https://cmake.org/download/)
 3. Download and install [Zig](https://ziglang.org/download/)
 
-### Prepare Linux for Compilation
+### Setup Linux for Compilation
 
 ```bash
 apt update
@@ -204,42 +203,6 @@ curl --proto '=https' --tlsv1.3 https://sh.rustup.rs -sSf | sh
 source $HOME/.cargo/env
 rustup target add x86_64-pc-windows-gnu
 ```
-
-### Compile Client on Windows for Windows
-
-```powershell
-cargo build --release --bin coconut_crab_client
-```
-
-Compiled executable will be output to `target/release/coconut_crab_client.exe`
-
-### Compile Server on Windows for Windows
-
-Copy compiled client executable to `coconut_crab_server/assets/public/coconut_crab_client.exe`
-
-```powershell
-cargo build --release --bin coconut_crab_server
-```
-
-Compiled executable will be output to `target/release/coconut_crab_server.exe`
-
-### Compile Client on Linux for Windows
-
-```bash
-cargo build --release --target x86_64-pc-windows-gnu --bin coconut_crab_client
-```
-
-Compiled executable will be output to `target/x86_64-pc-windows-gnu/release/coconut_crab_client.exe`
-
-### Compile Server on Linux for Linux
-
-Copy compiled client executable to `coconut_crab_server/assets/public/coconut_crab_client.exe`
-
-```bash
-cargo build --release --bin coconut_crab_server
-```
-
-Compiled executable will be output to `target/release/coconut_crab_server`
 
 # Support
 

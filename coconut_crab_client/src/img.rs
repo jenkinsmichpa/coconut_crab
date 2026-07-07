@@ -50,7 +50,7 @@ pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ()> {
 
 fn save_icon_to_disk(file_path: &PathBuf) {
     let Some(icon_file) = get_icon() else {
-        error!("Icon not avilable to save to disk");
+        error!("Icon not available to save to disk");
         return;
     };
     let icon = icon_file;

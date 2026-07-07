@@ -6,7 +6,7 @@ use coconut_crab_lib::web::validate::{validate_code, validate_code_segment};
 
 pub fn set_window_icon(ui: &Main) {
     let Some(icon_file) = get_icon() else {
-        error!("Icon not avilable to set window icon");
+        error!("Icon not available to set window icon");
         return;
     };
     let icon = icon_file;

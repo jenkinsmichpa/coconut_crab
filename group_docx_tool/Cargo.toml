@@ -4,6 +4,11 @@ version = "0.1.0"
 authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
 edition = "2024"
 description = "Generates and verifies randomish docx files for given group numbers"
+license = "MIT"
+repository = "https://github.com/jenkinsmichpa/coconut_crab"
+readme = "../README.md"
+keywords = ["docx", "education", "incident-response"]
+categories = ["education", "security"]
 
 [dependencies]
 docx-rust = "0.1.11"

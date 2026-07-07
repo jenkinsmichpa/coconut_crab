@@ -29,6 +29,10 @@ pub mod structs {
     }
 }
 
+pub mod codes {
+    pub const RECOVERY_REQUEST_CODE: &str = "0000-0000-0000-0000";
+}
+
 pub mod client {
     use crate::web::ureq_client::{web_get_recv_bytes_ureq, web_post_send_json_recv_text_ureq};
 
@@ -93,20 +97,18 @@ pub mod client_tls {
 }
 
 pub mod validate {
-    use hex::encode;
+    use hex::{decode, encode};
     use log::debug;
-    use purecrypto::hash::{Digest, Sha256};
+    use purecrypto::hash::HmacSha256;
     use regex::Regex;
     use std::sync::LazyLock;
 
     static ID_REGEX: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^[[:alnum:]]{16}$").expect("Invalid Regex"));
     static HOSTNAME_REGEX: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^[0-9A-Za-z.\-]{0,32}$").expect("Invalid Regex"));
-    static SHA265_REGEX: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^[0-9A-Za-z.\-]{1,32}$").expect("Invalid Regex"));
+    static SHA256_REGEX: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^[a-fA-F0-9]{64}$").expect("Invalid Regex"));
-    static KEY_REGEX: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^[a-fA-F0-9]{32,8192}$").expect("Invalid Regex"));
     static CODE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"^[[:alnum:]]{4}-[[:alnum:]]{4}-[[:alnum:]]{4}-[[:alnum:]]{4}$")
             .expect("Invalid Regex")
@@ -123,11 +125,14 @@ pub mod validate {
     }
 
     pub fn validate_proof(proof: &str) -> bool {
-        SHA265_REGEX.is_match(proof)
+        SHA256_REGEX.is_match(proof)
     }
 
     pub fn validate_key(key: &str) -> bool {
-        KEY_REGEX.is_match(key)
+        let len = key.len();
+        (128..=1024).contains(&len) // depends on key size (256-1024 chars for 512-4096 bit keys)
+            && len.is_multiple_of(2)
+            && key.chars().all(|c| c.is_ascii_hexdigit())
     }
 
     pub fn validate_code_segment(code_segment: &str) -> bool {
@@ -138,17 +143,21 @@ pub mod validate {
         CODE_REGEX.is_match(code)
     }
 
-    pub fn create_proof(proof_source: &mut Vec<u8>, secret: &str) -> String {
-        proof_source.extend_from_slice(secret.as_bytes());
-        let digest = Sha256::digest(proof_source);
-        debug!("Created SHA256 proof bytes: {:?}", digest.as_ref());
-        debug!("SHA265 hex value: {}", encode(digest.as_ref()));
-        encode(digest.as_ref())
+    pub fn create_proof(proof_source: &[u8], secret: &str) -> String {
+        let tag = HmacSha256::mac(secret.as_bytes(), proof_source);
+        debug!("Created HMAC-SHA256 proof: {}", encode(tag.as_ref()));
+        encode(tag.as_ref())
     }
 
-    pub fn check_proof(proof_source: &mut Vec<u8>, secret: &str, proof: &str) -> bool {
-        let true_proof = create_proof(proof_source, secret);
-        true_proof == proof
+    pub fn check_proof(proof_source: &[u8], secret: &str, proof: &str) -> bool {
+        let Ok(expected) = decode(proof) else {
+            return false;
+        };
+        bool::from(
+            HmacSha256::new(secret.as_bytes())
+                .chain(proof_source)
+                .verify(&expected),
+        )
     }
 }
 
@@ -177,6 +186,8 @@ mod ureq_client {
 
         Agent::config_builder()
             .tls_config(tls_config)
+            .timeout_global(Some(Duration::from_secs(30)))
+            .timeout_connect(Some(Duration::from_secs(10)))
             .build()
             .into()
     }
@@ -189,14 +200,21 @@ mod ureq_client {
     ) -> Option<Vec<u8>> {
         let mut retry_wait = initial_retry_wait;
         let client = create_client_ureq(verify_server);
-        for _ in 0..retries {
+        for attempt in 0..retries {
             let response = match client.get(url).call() {
                 Ok(response) => {
                     debug!("Received sever response to GET: {response:?}");
                     response
                 }
                 Err(error) => {
+                    if let ureq::Error::StatusCode(_) = &error {
+                        error!("Server rejected GET: {error:?} - not retrying");
+                        return None;
+                    }
                     error!("Failed to receive server response to GET: {error:?}");
+                    if attempt + 1 >= retries {
+                        return None;
+                    }
                     warn!("Sleeping for {retry_wait} seconds before retrying");
                     sleep(Duration::from_secs(retry_wait));
                     retry_wait *= 2;
@@ -209,11 +227,11 @@ mod ureq_client {
                 match header.to_str() {
                     Ok(header_str) => {
                         debug!(
-                            "Successfuly retrieved string of Content-Length header: {header_str}"
+                            "Successfully retrieved string of Content-Length header: {header_str}"
                         );
                         match header_str.parse() {
                             Ok(length) => {
-                                debug!("Successfuly parsed Content-Length header: {length}");
+                                debug!("Successfully parsed Content-Length header: {length}");
                                 content_length = length;
                             }
                             Err(error) => {
@@ -244,6 +262,9 @@ mod ureq_client {
                 }
                 Err(error) => {
                     debug!("Failed to read content bytes from response: {error}");
+                    if attempt + 1 >= retries {
+                        return None;
+                    }
                     warn!("Sleeping for {retry_wait} seconds before retrying");
                     sleep(Duration::from_secs(retry_wait));
                     retry_wait *= 2;
@@ -265,14 +286,21 @@ mod ureq_client {
     ) -> Option<String> {
         let mut retry_wait = initial_retry_wait;
         let client = create_client_ureq(verify_server);
-        for _ in 0..retries {
+        for attempt in 0..retries {
             let mut response = match client.post(url).send_json(json) {
                 Ok(response) => {
                     debug!("Received sever response to POST: {response:?}");
                     response
                 }
                 Err(error) => {
+                    if let ureq::Error::StatusCode(_) = &error {
+                        error!("Server rejected POST: {error:?} - not retrying");
+                        return None;
+                    }
                     error!("Failed to receive server response to POST: {error:?}");
+                    if attempt + 1 >= retries {
+                        return None;
+                    }
                     warn!("Sleeping for {retry_wait} seconds before retrying");
                     sleep(Duration::from_secs(retry_wait));
                     retry_wait *= 2;
@@ -287,6 +315,9 @@ mod ureq_client {
                 }
                 Err(error) => {
                     debug!("Failed to read content text from response: {error}");
+                    if attempt + 1 >= retries {
+                        return None;
+                    }
                     warn!("Sleeping for {retry_wait} seconds before retrying");
                     sleep(Duration::from_secs(retry_wait));
                     retry_wait *= 2;

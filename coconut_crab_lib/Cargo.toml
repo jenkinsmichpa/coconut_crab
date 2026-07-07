@@ -4,6 +4,11 @@ version = "0.1.0"
 authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
 edition = "2024"
 description = "Library for coconut_crab packages"
+license = "MIT"
+repository = "https://github.com/jenkinsmichpa/coconut_crab"
+readme = "../README.md"
+keywords = ["ransomware", "simulation", "incident-response", "education", "security"]
+categories = ["simulation", "security"]
 
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
@@ -11,7 +16,13 @@ regex = "1.12.3"
 log = "0.4.30"
 rust-embed = { version = "8.11.0", features = ["include-exclude"] }
 env_logger = "0.11.10"
-ureq = { version = "3.3.0", features = ["json", "vendored"] }
+ureq = { version = "3.3.0", default-features = false, features = [
+  "json",
+  "rustls",
+] }
 hex = "0.4.3"
-purecrypto = { version = "0.6", default-features = false, features = ["hash", "std"] }
+purecrypto = { version = "0.6", default-features = false, features = [
+  "hash",
+  "std",
+] }
 rustls = { version = "0.23.40", features = ["aws-lc-rs"] }

@@ -1,5 +1,5 @@
 #[derive(Debug, toasty::Model)]
-pub(crate) struct Victim {
+pub struct Victim {
     #[key]
     pub(crate) id: String,
     pub(crate) hostname: String,

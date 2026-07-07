@@ -24,7 +24,7 @@ pub fn get_lowercase_extension(path: &Path) -> String {
 pub fn get_file_size(path: &PathBuf) -> Result<u64, Error> {
     match fs::metadata(path) {
         Ok(metadata) => {
-            debug!("Successfuly extracted file metadata: {metadata:?}");
+            debug!("Successfully extracted file metadata: {metadata:?}");
             Ok(metadata.len())
         }
         Err(error) => {
@@ -34,10 +34,10 @@ pub fn get_file_size(path: &PathBuf) -> Result<u64, Error> {
     }
 }
 
-pub fn get_file_data(file_path: &PathBuf, max_size: &u64) -> Result<Option<Vec<u8>>, Error> {
+pub fn get_file_data(file_path: &PathBuf, max_size: u64) -> Result<Option<Vec<u8>>, Error> {
     match get_file_size(file_path) {
         Ok(size) => {
-            if size > *max_size {
+            if size > max_size {
                 warn!("File size ({size}) exceeds max read size ({max_size})");
                 return Ok(None);
             }
