@@ -11,14 +11,14 @@ use std::{
 
 const SHRED_BUFFER_SIZE: usize = 64 * 1024;
 
-pub fn shred(r: Receiver<Arc<PathBuf>>) -> thread::JoinHandle<()> {
+pub fn shred(receiver: Receiver<Arc<PathBuf>>) -> thread::JoinHandle<()> {
     debug!("Starting shredder thread");
     thread::spawn(move || {
         let mut rng_cheap = SmallRng::from_rng(&mut rand::rng());
         debug!("Created cheap random number generator");
 
         loop {
-            let file_path = match r.recv() {
+            let file_path = match receiver.recv() {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path

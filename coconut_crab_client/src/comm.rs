@@ -1,4 +1,4 @@
-use hex::FromHex;
+use hex::{FromHex, decode};
 use log::{debug, error, info};
 use purecrypto::rsa::BoxedRsaPublicKey;
 use std::{fs, path::PathBuf, str};
@@ -228,10 +228,33 @@ pub fn get_sym_key(
         },
         |key| {
             debug!("Server sent back a valid symmetric key: {key:?}");
+            let id_ciphertext = match decode(&status.symmetrically_encrypted_id) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    error!("Unable to decode hex encrypted id: {error}");
+                    return None;
+                }
+            };
+            let id_nonce = match <[u8; 12]>::from_hex(&status.symmetrically_encrypted_id_nonce) {
+                Ok(nonce) => nonce,
+                Err(error) => {
+                    error!("Unable to decode hex nonce: {error}");
+                    return None;
+                }
+            };
+            let id_tag = match <[u8; 16]>::from_hex(&status.symmetrically_encrypted_id_tag) {
+                Ok(tag) => tag,
+                Err(error) => {
+                    error!("Unable to decode hex tag: {error}");
+                    return None;
+                }
+            };
             let decrypt_id_attempt = decrypt_string(
-                &status.symmetrically_encrypted_id,
+                &id_ciphertext,
                 &key,
-                &status.symmetrically_encrypted_id_nonce,
+                &id_nonce,
+                &id_tag,
+                status.encryption_aad.as_bytes(),
             );
             debug!(
                 "Comparing server provided key decrypted ID ({:?}) to known ID ({})",

@@ -1,21 +1,12 @@
 fn main() {
     slint_build::compile("ui/main.slint").expect("Failed to get Slint UI file");
 
-    #[cfg(windows)]
-    windows_resource::create_windows_resource();
-}
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        embed_manifest::embed_manifest(embed_manifest::new_manifest("CoconutCrab.Client"))
+            .expect("unable to embed Windows manifest");
 
-#[cfg(windows)]
-mod windows_resource {
-    extern crate winapi;
-    extern crate winres;
-
-    pub fn create_windows_resource() {
-        let mut res = winres::WindowsResource::new();
-        res.set_language(winapi::um::winnt::MAKELANGID(
-            winapi::um::winnt::LANG_ENGLISH,
-            winapi::um::winnt::SUBLANG_ENGLISH_US,
-        ));
+        let mut res = winresource::WindowsResource::new();
+        res.set_language(0x0409); // English (US)
         res.set_icon("assets/img/favicon.ico");
         res.compile()
             .expect("Failed to build Windows resource file");

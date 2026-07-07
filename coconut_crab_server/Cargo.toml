@@ -7,7 +7,13 @@ description = "Simulated ransomware server for incident response testing"
 license = "MIT"
 repository = "https://github.com/jenkinsmichpa/coconut_crab"
 readme = "../README.md"
-keywords = ["ransomware", "simulation", "incident-response", "education", "security"]
+keywords = [
+  "ransomware",
+  "simulation",
+  "incident-response",
+  "education",
+  "security",
+]
 categories = ["simulation", "security"]
 
 [dependencies]
@@ -15,18 +21,16 @@ coconut_crab_lib = { path = "../coconut_crab_lib" }
 axum = "0.8.9"
 axum-embed = "0.1.0"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
-env_logger = "0.11.10"
+env_logger = "0.11.11"
 hex = "0.4.3"
-log = "0.4.30"
+log = "0.4.33"
 rand = "0.10.2"
-regex = "1.12.3"
-purecrypto = { version = "0.6", default-features = false, features = [
+purecrypto = { version = "0.6.26", default-features = false, features = [
   "rsa",
   "der",
   "std",
 ] }
 rust-embed = { version = "8.11.0", features = ["compression"] }
-serde = { version = "1.0.228", features = ["derive"] }
-toasty = { version = "0.7", features = ["turso"] }
+toasty = { version = "0.7.0", features = ["turso"] }
 tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
-rustls = { version = "0.23.40", features = ["aws-lc-rs"] }
+rustls = { version = "0.23.41", features = ["aws-lc-rs"] }

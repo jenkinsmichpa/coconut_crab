@@ -154,26 +154,26 @@ fn generate_code() -> String {
     let mut rng = StdRng::from_rng(&mut rand::rng());
     let code = loop {
         let mut code = String::with_capacity(19);
-        for i in 0..4 {
+        for segment in 0..4 {
             for _ in 0..4 {
                 let random_char = rng.random_range(0..62);
-                let c = if random_char < 10 {
+                let character = if random_char < 10 {
                     (b'0' + random_char) as char
                 } else if random_char < 36 {
                     (b'A' + (random_char - 10)) as char
                 } else {
                     (b'a' + (random_char - 36)) as char
                 };
-                code.push(c);
+                code.push(character);
             }
-            if i < 3 {
+            if segment < 3 {
                 code.push('-');
             }
         }
         if code != RECOVERY_REQUEST_CODE {
             break code;
         }
-        debug!("Generated the reserved recovery sentinel by chance; regenerating");
+        debug!("Generated the reserved recovery sentinel by miracle... regenerating");
     };
     debug!("Generated new code: {code}");
     code
@@ -416,7 +416,6 @@ async fn announce_completion(
     Ok("Success")
 }
 
-#[allow(clippy::too_many_lines)]
 async fn download_sym_key(
     State(state): State<AppState>,
     extract::Json(downloadsymkey): extract::Json<DownloadSymKey>,

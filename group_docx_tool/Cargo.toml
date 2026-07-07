@@ -14,8 +14,8 @@ categories = ["education", "security"]
 docx-rust = "0.1.11"
 hex = "0.4.3"
 rand = "0.10.2"
-purecrypto = { version = "0.6", default-features = false, features = [
+purecrypto = { version = "0.6.26", default-features = false, features = [
   "hash",
   "std",
 ] }
-ureq = "3.3.0"
+ureq = { version = "3.3.0", default-features = false, features = ["rustls"] }

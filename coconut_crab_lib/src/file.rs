@@ -1,3 +1,5 @@
+#![allow(clippy::missing_errors_doc)]
+
 use log::{debug, error, info, warn};
 use std::{
     env::current_exe,

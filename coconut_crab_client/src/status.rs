@@ -1,6 +1,6 @@
 use csv::{ReaderBuilder, WriterBuilder};
 use log::{debug, error, info};
-use rand::{RngExt, SeedableRng, distr::Alphanumeric, rngs::StdRng};
+use rand::{distr::Alphanumeric, rngs::StdRng, RngExt, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::{fs::File, path::Path, sync::LazyLock};
 
@@ -13,6 +13,8 @@ pub struct Status {
     pub encryption_complete: bool,
     pub symmetrically_encrypted_id: String,
     pub symmetrically_encrypted_id_nonce: String,
+    pub symmetrically_encrypted_id_tag: String,
+    pub encryption_aad: String,
 }
 
 pub static STATUS_FILENAME: LazyLock<String> = LazyLock::new(|| lc!("status.csv"));
@@ -68,6 +70,8 @@ pub fn create_status() -> Status {
         encryption_complete: false,
         symmetrically_encrypted_id: String::new(),
         symmetrically_encrypted_id_nonce: String::new(),
+        symmetrically_encrypted_id_tag: String::new(),
+        encryption_aad: String::from("Cartier and Tiffany"),
     };
     debug!("Created new status: {status:?}");
     status

