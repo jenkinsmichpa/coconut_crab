@@ -267,7 +267,9 @@ fn main() {
         export_status_csv(exe_path_dir_arc.as_ref(), &status);
         debug!("Updated status CSV");
 
-        let (channel_a_sender, channel_a_receiver) = crossbeam_channel::unbounded();
+        let cap = |consumers: usize| -> usize { std::cmp::max(consumers * 2, 64) };
+        let (channel_a_sender, channel_a_receiver) =
+            crossbeam_channel::bounded(cap(num_threads.encrypt_threads));
         let mut thread_handles = Vec::new();
 
         for path_workload in allowlist_paths
@@ -307,12 +309,14 @@ fn main() {
             thread_handles.len()
         );
 
-        let (channel_c_sender, channel_c_receiver) = crossbeam_channel::unbounded();
+        let (channel_c_sender, channel_c_receiver) =
+            crossbeam_channel::bounded(cap(num_threads.shred_threads));
 
         if analyze_pdf || analyze_office_zip || avoid_broken_images {
             debug!("Canary mode enabled");
 
-            let (channel_b_sender, channel_b_receiver) = crossbeam_channel::unbounded();
+            let (channel_b_sender, channel_b_receiver) =
+                crossbeam_channel::bounded(cap(num_threads.encrypt_threads_canary));
 
             for thread_num in 0..num_threads.canary_threads {
                 thread_handles.push(filter_canary(
@@ -441,7 +445,8 @@ fn main() {
     debug!("Cleared symmetric key from memory");
 
     let decryption_operation = move |sym_key: [u8; 32]| {
-        let (s3, r3) = crossbeam_channel::unbounded();
+        let (s3, r3) =
+            crossbeam_channel::bounded(std::cmp::max(num_threads.decrypt_threads * 2, 64));
         let mut thread_handles = Vec::new();
 
         for path_workload in allowlist_paths
