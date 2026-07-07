@@ -12,10 +12,8 @@ This is client (coconut_crab_client) / server (coconut_crab_server) application 
 
 The following additional applications are included:
 
-- **coconut_crab_base_drop** - A basic dropper with a self-contained web client to download and execute coconut_crab_client 
 - **group_docx_tool** - A tool to create and verify the authenticity of previously created DOCX files for groups
-    - **group_docx_drop** - An accompanying bash script to copy DOCX files to the DC shares of their associated groups **(untested)**
-- **coconut_crab_blue_drop** - A tool wrapping [AutoBlue](https://github.com/3ndG4me/AutoBlue-MS17-010/blob/master/zzz_exploit.py) to exploit MS-17-010 to download and execute coconut_crab_client **(untested)**
+  - **group_docx_drop** - An accompanying bash script to copy DOCX files to the DC shares of their associated groups **(untested)**
 
 ### Communication
 
@@ -25,8 +23,8 @@ The following HTTPS requests are sent in sequence:
 2. **Registration** - Client uploads ID and hostname
 3. **Symmetric Key Upload** - Client uploads asymmetrically encrypted symmetric key
 4. **Symmetric Key Recovery** - Client requests symmetric key due to premature end (if not completed and within accepted time period)
-6. **Completion Announcement** - Client announces that it has completed the encryption process
-7. **Symmetric Key Download** - Client provides a decryption code and downloads symmetric key
+5. **Completion Announcement** - Client announces that it has completed the encryption process
+6. **Symmetric Key Download** - Client provides a decryption code and downloads symmetric key
 
 ### Encryption Pipeline
 
@@ -41,7 +39,6 @@ The client performs the following steps to encrypt a file:
 
 ![Coconut Crab Client GUI](coconut_crab_client_gui.png "Coconut Crab Client GUI")
 
-
 ## Features
 
 - Does not run unless the server can be reached for sandboxing
@@ -50,49 +47,50 @@ The client performs the following steps to encrypt a file:
 - Configurable TLS encryption in transit
 - Configurable and easily modified to be flawed or generate artifacts for detection
 - Configurable allow and block lists
-    - Filesystem paths
-    - File extensions
+  - Filesystem paths
+  - File extensions
 - Configurable encryption delay time and jitter
 - Configurable canary avoidance
-    - Analyzes PDF and Office / Zip files
-    - Avoids hidden directories and files
-    - Identifies keywords
-    - Identifies non-default URLs
-    - Identifies broken images
+  - Analyzes PDF and Office / Zip files
+  - Avoids hidden directories and files
+  - Identifies keywords
+  - Identifies non-default URLs
+  - Identifies broken images
 - Configurable persistence through a registry entry
 - Implements a logging crate with (maybe too) verbose output
-    - Client output is automatically shown in debug mode and hidden in release mode
+  - Client output is automatically shown in debug mode and hidden in release mode
 - Less sketchy output executable
-    - Windows PE file complete with an icon and properties
-    - All necessary certificates / assets are embedded within the EXE file
-        - Including the client EXE served by the server
+  - Windows PE file complete with an icon and properties
+  - All necessary certificates / assets are embedded within the EXE file
+    - Including the client EXE served by the server
 - All persistent application information is stored in a CSV for simple viewing and modification
 - Configurable setting of desktop wallpaper
+- High-performance filesystem walking via zlob (SIMD-optimized, multicore, platform-optimized syscalls)
 - Reaps benefits being written in Rust including
-    - AV doesn't work on it as well
-    - Speed
-        - Compiled executables
-        - Multithreaded pipeline for the client
-        - Asynchronous design for the server
-    - Memory safe / no garbage collection
-    - Cross-platform-ish
-    - Implements standard / reviewed cryptography crates (RSA and ChaCha20)
+  - AV doesn't work on it as well
+  - Speed
+    - Compiled executables
+    - Multithreaded pipeline for the client
+    - Asynchronous design for the server
+  - Memory safe / no garbage collection
+  - Cross-platform-ish
+  - Implements standard / reviewed cryptography crates (RSA and ChaCha20)
 
 ## Considerations
 
 As this is an application for education and not real-world use, there were several shortcuts made to the design including the following:
 
 - A baked in secret is used for request validation and is shared by every client
-    - As a mitigation, the secret is obfuscated using litcrypt 
+  - As a mitigation, the secret is obfuscated using litcrypt
 - Every request sent to the server is SHA265 hashed combined with the secret for validation
-    - The server is easy to DoS as it does not implement a rate limit
-    - The server is not resistant to replay attacks
+  - The server is easy to DoS as it does not implement a rate limit
+  - The server is not resistant to replay attacks
 - By default, the application is configured to use publicaly known RSA key pairs for encryption
-    - These can be changed before compilation
+  - These can be changed before compilation
 - By default, the application is configured not to validate HTTPS certificates to allow the use of self-signed certificates
-    - Validation can be enabled through the configuration
+  - Validation can be enabled through the configuration
 - The client must request a public key from the server before it can begin (to create artifacts for students)
-    - By default, the public key is written to the victim hard drive. This can be disabled through the configuration.
+  - By default, the public key is written to the victim hard drive. This can be disabled through the configuration.
 
 **I am not a software engineer and this is my first time with Rust. Beware of data loss!**
 
@@ -102,33 +100,33 @@ As this is an application for education and not real-world use, there were sever
 
 ### Client Configuration
 
-Client configuration variables are at the top of `coconut_crab_client/src/main.rs`
+Client configuration variables are in `coconut_crab_client/src/config.rs`
 
-Variable | Summary
---- | ---
-server_port | remote web server port (must match server)
-server_fqdn | remote web server hostname or IP address of server
-allowlist_paths | paths to target
-blocklist_paths | paths to avoid (optional)
-allowlist_extensions | file extensions to target (optional)
-blocklist_extensions | file extensions to avoid (optional)
-encrypted_extension | file extension applied to encrypted files
-save_public_key_to_disk | should client save public encryption key to disk
-set_wallpaper | should the client set desktop wallpaper to the application icon
-https | should the client use HTTP or HTTPS with TLS
-verify_server | should the client validate HTTPS certificates
-analyze_mode | should files be logged instead of encrypted
-persist | should a registry startup entry be created
-avoid_hidden | should the client avoid hidden directories and files
-avoid_urls | should client avoid URLs that do not occur natively in Office files
-avoid_keywords | should client avoid keywords associated with canary files
-avoid_broken_images | should client avoid images that cannot be rendered correctly
-analyze_office_zip | should client analyze office and zip files for caneries
-analyze_pdf | should client analyze pdf files for caneries
-random_order | should client randomize the order that files are encrypted
-wait_time | time to wait between file encryptions (set to 0 for no delay)
-jitter_time | time variance applied wait_time
-preshared_secret | code used to validate web requests (must match server)
+Variable | Type | Summary
+--- | --- | ---
+SERVER_PORT | u16 | remote web server port (must match server)
+SERVER_FQDN | LazyLock\<String\> | remote web server hostname or IP address
+ALLOWLIST_PATHS | LazyLock\<Vec\<PathBuf\>\> | paths to target
+BLOCKLIST_PATHS | Option\<Vec\<PathBuf\>\> | paths to avoid (optional)
+ALLOWLIST_EXTENSIONS | LazyLock\<Vec\<String\>\> | file extensions to target (optional)
+BLOCKLIST_EXTENSIONS | Option\<Vec\<String\>\> | file extensions to avoid (optional)
+ENCRYPTED_EXTENSION | LazyLock\<String\> | file extension applied to encrypted files
+SAVE_PUBLIC_KEY_TO_DISK | bool | should client save public encryption key to disk
+SET_WALLPAPER | bool | should the client set desktop wallpaper to the application icon
+HTTPS | bool | should the client use HTTP or HTTPS with TLS
+VERIFY_SERVER | bool | should the client validate HTTPS certificates
+ANALYZE_MODE | bool | should files be logged instead of encrypted
+PERSIST | bool | should a registry startup entry be created
+AVOID_HIDDEN | bool | should the client avoid hidden directories and files
+AVOID_URLS | bool | should client avoid URLs that do not occur natively in Office files
+AVOID_KEYWORDS | bool | should client avoid keywords associated with canary files
+AVOID_BROKEN_IMAGES | bool | should client avoid images that cannot be rendered correctly
+ANALYZE_OFFICE_ZIP | bool | should client analyze office and zip files for canaries
+ANALYZE_PDF | bool | should client analyze pdf files for canaries
+RANDOM_ORDER | bool | should client randomize the order that files are encrypted
+WAIT_TIME | u32 | time to wait between file encryptions (set to 0 for no delay)
+JITTER_TIME | u32 | time variance applied to wait_time
+PRESHARED_SECRET | LazyLock\<String\> | code used to validate web requests (must match server)
 
 GUI text can be configured in `coconut_crab_client/ui/main.slint`
 
@@ -140,18 +138,22 @@ Persistent client variables can be found in the `status.csv` generated by the ex
 
 ### Server Configuration
 
-Client configuration variables are at the top of `coconut_crab_server/src/main.us`
+Server configuration variables are at the top of `coconut_crab_server/src/main.rs`
 
 Variable | Summary
 --- | ---
 PORT | web server port (must match client)
 RECOVERY_WINDOW | time period that a symmetric key can be recovered if lost by client
 PRESHARED_SECRET | code used to validate web requests (must match client)
-BYPASS_CODE | code used to unlock decryption on any client
+BYPASS_CODE | code used to unlock decryption on any victim
 
 Decryption codes can be found in the `victims.csv` file generated by the executable
 
 ## Compilation
+
+### Prerequisites
+
+- **Zig** - zlob requires Zig to compile.
 
 ### Configure HTTPS Certificates
 
@@ -168,8 +170,8 @@ openssl req -x509 -newkey rsa:4096 -keyout ca-key.pem -out ca-cert.pem -sha256 -
 openssl req -newkey rsa:4096 -nodes -keyout key.pem -out server.csr -config ./cert.cnf
 openssl x509 -req -in server.csr -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out cert.pem -days 3650 -sha256 -extfile cert.ext
 ```
-- See `coconut_crab_lib/assets/cert/ca-cert.cnf`, `coconut_crab_lib/assets/cert/cert.ext`, and `coconut_crab_lib/assets/cert/cert.ext` for example configuration and extension files
 
+- See `coconut_crab_lib/assets/cert/ca-cert.cnf`, `coconut_crab_lib/assets/cert/cert.ext`, and `coconut_crab_lib/assets/cert/cert.ext` for example configuration and extension files
 
 ### Configure Encryption Certificates
 
@@ -191,12 +193,13 @@ openssl rsa -pubin -in public.pem -RSAPublicKey_out -out public_pkcs1.pem -tradi
 
 1. Download and install [rustup](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
 2. Download and install [cmake](https://cmake.org/download/)
+3. Download and install [Zig](https://ziglang.org/download/)
 
 ### Prepare Linux for Compilation
 
 ```bash
 apt update
-apt install build-essential pkg-config libssl-dev mingw-w64
+apt install build-essential pkg-config libssl-dev mingw-w64 zig
 curl --proto '=https' --tlsv1.3 https://sh.rustup.rs -sSf | sh
 source $HOME/.cargo/env
 rustup target add x86_64-pc-windows-gnu
@@ -239,10 +242,13 @@ cargo build --release --bin coconut_crab_server
 Compiled executable will be output to `target/release/coconut_crab_server`
 
 # Support
+
 If you have any issues with this application, feel free to reach out to [Michael Jenkins](https://jenkinsmichpa.com).
 
 # Authors and Acknowledgement
+
 This project was developed by [Michael Jenkins](https://jenkinsmichpa.com) with the help of [Samuel Ho](mailto:ho176@purdue.edu) for use in teaching Purdue CNIT 47000 - Incident Response Management.
 
 # License
+
 This project is licensed with the MIT License.

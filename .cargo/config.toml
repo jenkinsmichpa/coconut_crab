@@ -1,0 +1,4 @@
+[env]
+# clang reports "arm64-apple-darwin" but bindgen expects "aarch64-apple-darwin".
+# Remove when zlob updates its bindgen dependency past 0.72.1.
+BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin = "--target=aarch64-apple-darwin"

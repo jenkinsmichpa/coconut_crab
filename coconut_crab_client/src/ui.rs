@@ -1,18 +1,15 @@
 use log::{debug, error};
 use slint::{ComponentHandle, Image, Rgba8Pixel, SharedPixelBuffer};
 
-use crate::img::get_icon;
-use crate::Main;
+use crate::{Main, img::get_icon};
 use coconut_crab_lib::web::validate::{validate_code, validate_code_segment};
 
 pub fn set_window_icon(ui: &Main) {
-    let icon = match get_icon() {
-        Some(icon_file_result) => icon_file_result,
-        None => {
-            error!("Icon not avilable to set window icon");
-            return;
-        }
+    let Some(icon_file) = get_icon() else {
+        error!("Icon not avilable to set window icon");
+        return;
     };
+    let icon = icon_file;
     let window_icon = icon.into_rgba8();
     let image_buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
         window_icon.as_raw(),
@@ -20,25 +17,25 @@ pub fn set_window_icon(ui: &Main) {
         window_icon.height(),
     );
     ui.set_window_icon(Image::from_rgba8(image_buffer));
-    debug!("SuccesFsfully set window icon");
+    debug!("Successfully set window icon");
 }
 
 pub fn callback_handler_init(ui: &Main) {
     ui.on_enforce_code_segment_format(move |new_text| {
         let mut rust_string = new_text.as_str().to_string();
-        debug!("Enforcing format on code segment: {}", rust_string);
+        debug!("Enforcing format on code segment: {rust_string}");
         rust_string.truncate(4);
         let alphanumeric_string = rust_string
             .chars()
-            .filter(|c| c.is_ascii_alphanumeric())
+            .filter(char::is_ascii_alphanumeric)
             .collect::<String>();
-        debug!("Formatted field: {}", alphanumeric_string);
+        debug!("Formatted field: {alphanumeric_string}");
         alphanumeric_string.into()
     });
 
     ui.on_check_code_segment_format(move |new_text| {
         let code_segment = new_text.as_str().to_string();
-        debug!("Validating code segment field: {}", code_segment);
+        debug!("Validating code segment field: {code_segment}");
         validate_code_segment(&code_segment)
     });
 
@@ -59,7 +56,7 @@ pub fn callback_handler_init(ui: &Main) {
                 ui.get_code_segment_3(),
                 ui.get_code_segment_4()
             );
-            debug!("Validating combined code: {}", code);
+            debug!("Validating combined code: {code}");
             ui.set_code(code.clone().into());
 
             if validate_code(&code) {
@@ -70,7 +67,7 @@ pub fn callback_handler_init(ui: &Main) {
                 ui.set_code_valid(false);
             }
         } else {
-            debug!("One or more code segment are invalid")
+            debug!("One or more code segment are invalid");
         }
     });
 }

