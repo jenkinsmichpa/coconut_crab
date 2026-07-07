@@ -19,7 +19,6 @@ purecrypto = { version = "0.6", default-features = false, features = [
   "der",
   "std",
 ] }
-walkdir = "2.5.0"
 zeroize = "1.8.2"
 serde = { version = "1.0.228", features = ["derive"] }
 csv = "1.4.0"
@@ -37,6 +36,7 @@ regex = "1.12.3"
 lazy_static = "1.5.0"
 zip = "8.6.0"
 wallpaper = "3.2.0"
+zlob = "1.6.0"
 [build-dependencies]
 winres = "0.1.12"
 winapi = { version = "0.3.9", features = ["winnt"] }

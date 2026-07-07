@@ -1153,12 +1153,12 @@ dependencies = [
  "serde",
  "slint",
  "slint-build",
- "walkdir",
  "wallpaper",
  "winapi",
  "winres",
  "zeroize",
  "zip 8.6.0",
+ "zlob",
 ]
 
 [[package]]
@@ -8008,6 +8008,16 @@ name = "zlib-rs"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5431d5661c32445236631278f27946e444ddafe4684cac70b185272d4f9c52d5"
+
+[[package]]
+name = "zlob"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ac79e3c770a01c3247c9c9bcdf48733de52438c407a8b9c5fe3ce5f12e247c1"
+dependencies = [
+ "bindgen",
+ "bitflags 2.13.0",
+]
 
 [[package]]
 name = "zmij"
