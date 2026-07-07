@@ -77,7 +77,8 @@ pub fn create_status() -> Status {
 }
 
 fn get_hostname() -> String {
-    let hostname = match hostname::get() {
+    
+    match hostname::get() {
         Ok(hostname_result) => {
             debug!("Got hostname: {:?}", hostname_result);
             hostname_result.to_string_lossy().to_string()
@@ -86,8 +87,7 @@ fn get_hostname() -> String {
             error!("Error getting hostname: {}", hostname_result);
             String::from("HostnameError")
         }
-    };
-    hostname
+    }
 }
 
 fn get_id() -> String {

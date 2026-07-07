@@ -9,7 +9,8 @@ use csv::{ReaderBuilder, WriterBuilder};
 use hex::{decode, encode};
 use log::{debug, error, info, warn};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use rsa::{pkcs1::DecodeRsaPrivateKey, Pkcs1v15Encrypt, RsaPrivateKey};
+/// RSA key size in 64-bit limbs (2048 bits / 64 = 32).
+const RSA_LIMBS: usize = 32;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -232,7 +233,7 @@ fn decrypt_key(key: &str) -> String {
             .to_vec(),
     )
     .expect("Failed to read PEM file");
-    let private_key = RsaPrivateKey::from_pkcs1_pem(&pem).expect("Failed to parse PEM key");
+    let private_key = purecrypto::rsa::RsaPrivateKey::<RSA_LIMBS>::from_pkcs1_pem(&pem).expect("Failed to parse PEM key");
     let key_vec = match decode(key) {
         Ok(key_array_result) => {
             debug!("Decoded Key: {:?}", key_array_result);
@@ -243,7 +244,7 @@ fn decrypt_key(key: &str) -> String {
             return String::from("Invalid Key");
         }
     };
-    let key = match private_key.decrypt(Pkcs1v15Encrypt, &key_vec) {
+    let key = match private_key.decrypt_pkcs1v15(&key_vec) {
         Ok(key_result) => {
             debug!("Decrypted Key: {:?}", key_result);
             key_result

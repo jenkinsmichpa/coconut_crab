@@ -1,15 +1,13 @@
-use chacha20::{
-    cipher::{KeyIvInit, StreamCipher, StreamCipherSeek},
-    ChaCha20,
-};
 use crossbeam_channel::{Receiver, Sender};
 use hex::{decode, encode, FromHex};
 use log::{debug, error, info, warn};
+use purecrypto::cipher::ChaCha20;
 use rand::{
-    rngs::{SmallRng, StdRng, ThreadRng},
+    rngs::{SmallRng, StdRng},
     Rng, SeedableRng,
 };
-use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
+/// RSA key size in 64-bit limbs (2048 bits / 64 = 32).
+const RSA_LIMBS: usize = 32;
 use std::{
     fs::{self, File, OpenOptions},
     io::{Error, Read, Write},
@@ -285,7 +283,7 @@ fn apply_chacha(
     key: &[u8; 32],
     full_nonce_bytes: &[u8; 12],
 ) -> Result<(), Error> {
-    let mut cipher = ChaCha20::new(key.into(), full_nonce_bytes.into());
+    let cipher = ChaCha20::new(key);
 
     let source_file_data = match get_file_data(
         source_file_path,
@@ -303,7 +301,7 @@ fn apply_chacha(
 
     if let Some(mut some_source_file_data) = source_file_data {
         debug!("File size is below threshold. Performing encryption with entire file in memory.");
-        cipher.apply_keystream(&mut some_source_file_data);
+        cipher.apply_keystream(full_nonce_bytes, 0, &mut some_source_file_data);
 
         match fs::write(destination_file_path, &some_source_file_data) {
             Ok(_) => {
@@ -365,8 +363,7 @@ fn apply_chacha(
                 break;
             }
 
-            cipher.seek(bytes_read);
-            cipher.apply_keystream(&mut buffer);
+            cipher.apply_keystream(full_nonce_bytes, (bytes_read / 64) as u32, &mut buffer);
             bytes_read += BUFFER_LEN as u64;
             debug!("{} total bytes read and encrypted", bytes_read);
             match destination_file_data.write_all(&buffer) {
@@ -390,11 +387,10 @@ fn apply_chacha(
 }
 
 pub fn encrypt_string(source: &str, key: &[u8; 32], full_nonce_bytes: &[u8; 12]) -> String {
-    let mut cipher = ChaCha20::new(key.into(), full_nonce_bytes.into());
     debug!("Encrypting string: {}", source);
     let mut source_data = source.as_bytes().to_vec();
     debug!("String bytes: {:?}", source_data);
-    cipher.apply_keystream(&mut source_data);
+    ChaCha20::new(key).apply_keystream(full_nonce_bytes, 0, &mut source_data);
     debug!("String encrypted: {:?}", encode(&source_data));
     encode(source_data)
 }
@@ -430,9 +426,8 @@ pub fn decrypt_string(source_str: &str, key: &[u8; 32], nonce_str: &str) -> Stri
         }
     };
 
-    let mut cipher = ChaCha20::new(key.into(), &full_nonce_bytes.into());
     debug!("Decrypting to string: {:?}", source_data);
-    cipher.apply_keystream(&mut source_data);
+    ChaCha20::new(key).apply_keystream(&full_nonce_bytes, 0, &mut source_data);
     debug!("String bytes: {:?}", source_data);
     match String::from_utf8(source_data) {
         Ok(bytes_string_result) => {
@@ -456,11 +451,15 @@ pub fn generate_sym_key(sym_key: &mut [u8; 32]) {
     debug!("Generated symmetric key");
 }
 
-pub fn encrypt_sym_key(asym_pub_key: &RsaPublicKey, sym_key: &[u8; 32]) -> String {
-    let mut rng = ThreadRng::default();
+pub fn encrypt_sym_key(
+    asym_pub_key: &purecrypto::rsa::RsaPublicKey<RSA_LIMBS>,
+    sym_key: &[u8; 32],
+) -> String {
+    use purecrypto::rng::OsRng;
+    let mut rng = OsRng;
     encode(
         asym_pub_key
-            .encrypt(&mut rng, Pkcs1v15Encrypt, sym_key)
+            .encrypt_pkcs1v15(sym_key, &mut rng)
             .expect("Failed to encrypt symmetric key"),
     )
 }

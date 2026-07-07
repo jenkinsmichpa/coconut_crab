@@ -1,9 +1,9 @@
 use hex::FromHex;
 use log::{debug, error, info};
-use rsa::{
-    pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey},
-    RsaPublicKey,
-};
+use purecrypto::rsa::RsaPublicKey;
+
+/// RSA key size in 64-bit limbs (2048 bits / 64 = 32).
+const RSA_LIMBS: usize = 32;
 use std::{fs, path::PathBuf, str};
 
 use crate::crypto::decrypt_string;
@@ -17,23 +17,12 @@ use coconut_crab_lib::{
     },
 };
 
-pub fn write_asym_pub_key_to_disk(asym_pub_key: &RsaPublicKey, file_path: &PathBuf) {
-    let pem_data = match asym_pub_key.to_pkcs1_pem(rsa::pkcs8::LineEnding::LF) {
-        Ok(pem_data_result) => {
-            debug!(
-                "Successfully converted public key to PEM data: {}",
-                pem_data_result
-            );
-            pem_data_result
-        }
-        Err(pem_data_result) => {
-            error!(
-                "Unable to convert public key to PEM data: {}",
-                pem_data_result
-            );
-            return;
-        }
-    };
+pub fn write_asym_pub_key_to_disk(asym_pub_key: &RsaPublicKey<RSA_LIMBS>, file_path: &PathBuf) {
+    let pem_data = asym_pub_key.to_pkcs1_pem();
+    debug!(
+        "Successfully converted public key to PEM data: {}",
+        pem_data
+    );
     match write_to_file(pem_data.as_bytes(), file_path) {
         Ok(_) => {
             info!("Successfully wrote PEM data to file: {:?}", file_path);
@@ -45,10 +34,11 @@ pub fn write_asym_pub_key_to_disk(asym_pub_key: &RsaPublicKey, file_path: &PathB
 }
 
 #[allow(dead_code)]
-pub fn import_asym_pub_key(file_path: &PathBuf) -> RsaPublicKey {
+pub fn import_asym_pub_key(file_path: &PathBuf) -> RsaPublicKey<RSA_LIMBS> {
     let pem = fs::read_to_string(file_path).expect("Failed to read PEM file");
     debug!("Read public key PEM data {}", pem);
-    let public_key = RsaPublicKey::from_pkcs1_pem(&pem).expect("Failed to parse PEM public key");
+    let public_key =
+        RsaPublicKey::<RSA_LIMBS>::from_pkcs1_pem(&pem).expect("Failed to parse PEM public key");
     debug!("Parsed PEM to public key {:?}", public_key);
     public_key
 }
@@ -58,7 +48,7 @@ pub fn download_asym_pub_key(
     port: &u16,
     https: &bool,
     verify_server: &bool,
-) -> RsaPublicKey {
+) -> RsaPublicKey<RSA_LIMBS> {
     let identifier = if *https { "https" } else { "http" };
     let url = format!(
         "{}://{}:{}/download/asym-pub-key.pem",
@@ -67,7 +57,7 @@ pub fn download_asym_pub_key(
     debug!("Asymmetric public key download URL: {}", url);
     let content = web_get_recv_bytes(&url, verify_server).expect("Unable to get content");
     debug!("Response content bytes: {:?}", content);
-    let public_key = RsaPublicKey::from_pkcs1_pem(
+    let public_key = RsaPublicKey::<RSA_LIMBS>::from_pkcs1_pem(
         str::from_utf8(&content).expect("Failed to parse PEM key string"),
     )
     .expect("Failed to parse PEM key");

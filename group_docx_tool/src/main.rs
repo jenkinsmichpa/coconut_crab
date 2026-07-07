@@ -2,7 +2,7 @@ use docx_rust::{document::Paragraph, Docx, DocxFile};
 use hex::encode;
 use rand::seq::SliceRandom;
 use rand::{rngs::SmallRng, SeedableRng};
-use sha2::{Digest, Sha256};
+use purecrypto::hash::{Sha256, Digest};
 use std::fs;
 use ureq::get;
 
@@ -47,14 +47,12 @@ fn main() {
         .filter(|x| x.len() >= MIN_WORD_SIZE && x.len() <= MAX_WORD_SIZE)
         .collect();
     let mut rng_cheap = SmallRng::from_os_rng();
-    let mut hasher = Sha256::new();
 
     for group in GROUPS {
         let file_name = format!("Group {} Important Document.docx", group);
         let mut source = SECRET.to_vec();
         source.push(group);
-        hasher.update(source);
-        let hash = encode(hasher.finalize_reset());
+        let hash = encode(Sha256::digest(&source));
 
         if fs::metadata(&file_name).is_ok() {
             println!("File '{}' already exists. Checking file...", file_name);

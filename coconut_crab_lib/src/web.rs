@@ -97,7 +97,7 @@ pub mod validate {
     use lazy_static::lazy_static;
     use log::debug;
     use regex::Regex;
-    use sha2::{Digest, Sha256};
+    use purecrypto::hash::{Sha256, Digest};
 
     lazy_static! {
         static ref ID_REGEX: Regex = Regex::new(r"^[[:alnum:]]{16}$").expect("Invalid Regex");
@@ -138,12 +138,10 @@ pub mod validate {
 
     pub fn create_proof(proof_source: &mut Vec<u8>, secret: &str) -> String {
         proof_source.extend_from_slice(secret.as_bytes());
-        let mut hasher = Sha256::new();
-        hasher.update(proof_source);
-        let hash = hasher.finalize();
-        debug!("Created SHA256 proof bytes: {:?}", hash);
-        debug!("SHA265 hex value: {}", encode(hash));
-        encode(hash)
+        let digest = Sha256::digest(proof_source);
+        debug!("Created SHA256 proof bytes: {:?}", digest.as_ref());
+        debug!("SHA265 hex value: {}", encode(digest.as_ref()));
+        encode(digest.as_ref())
     }
 
     pub fn check_proof(proof_source: &mut Vec<u8>, secret: &str, proof: &str) -> bool {

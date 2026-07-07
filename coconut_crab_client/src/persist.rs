@@ -26,8 +26,7 @@ fn get_autolaunch() -> Result<AutoLaunch, io::Error> {
         }
         Err(autolaunch_result) => {
             error!("Failed to create AutoLaunch: {}", autolaunch_result);
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 autolaunch_result.to_string(),
             ));
         }
