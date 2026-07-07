@@ -10,7 +10,6 @@ coconut_crab_lib = { path = "../coconut_crab_lib" }
 axum = "0.8.9"
 axum-embed = "0.1.0"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
-csv = "1.4.0"
 env_logger = "0.11.10"
 hex = "0.4.3"
 log = "0.4.30"
@@ -23,5 +22,6 @@ purecrypto = { version = "0.6", default-features = false, features = [
 ] }
 rust-embed = { version = "8.11.0", features = ["compression"] }
 serde = { version = "1.0.228", features = ["derive"] }
+toasty = { version = "0.7", features = ["turso"] }
 tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
 rustls = { version = "0.23.40", features = ["aws-lc-rs"] }
