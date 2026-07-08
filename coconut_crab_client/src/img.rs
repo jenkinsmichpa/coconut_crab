@@ -34,7 +34,6 @@ pub fn get_window_icon() -> Option<DynamicImage> {
 }
 
 pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ()> {
-    // Try with explicit ICO format first for reliability
     let mut reader = ImageReader::new(Cursor::new(bytes));
     reader.set_format(image::ImageFormat::Ico);
     match reader.decode() {
@@ -46,7 +45,6 @@ pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ()> {
             debug!("ICO format decode failed ({error}), trying with guessed format");
         }
     }
-    // Fallback: let decode() auto-detect the format from content bytes
     let fallback_reader = ImageReader::new(Cursor::new(bytes));
     match fallback_reader.decode() {
         Ok(image) => {
