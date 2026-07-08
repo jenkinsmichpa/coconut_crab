@@ -1,11 +1,11 @@
 use log::{debug, error};
 use slint::{ComponentHandle, Image, Rgba8Pixel, SharedPixelBuffer};
 
-use crate::{Main, img::get_icon};
+use crate::{img::get_window_icon, Main};
 use coconut_crab_lib::web::validate::{validate_code, validate_code_segment};
 
 pub fn set_window_icon(ui: &Main) {
-    let Some(icon_file) = get_icon() else {
+    let Some(icon_file) = get_window_icon() else {
         error!("Icon not available to set window icon");
         return;
     };

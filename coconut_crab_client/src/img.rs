@@ -17,32 +17,44 @@ pub fn get_icon() -> Option<DynamicImage> {
         return None;
     };
     debug!("Successfully got icon file");
-    img_from_bytes(&icon_file.data).map_or_else(
-        |()| {
+    let image = img_from_bytes(&icon_file.data)
+        .map_err(|()| {
             error!("Failed to get decoded icon");
-            None
-        },
-        |image| {
-            debug!("Successfully got decoded icon");
-            Some(image)
-        },
-    )
+        })
+        .ok()?;
+    debug!("Successfully got decoded icon");
+    Some(image)
+}
+
+pub fn get_window_icon() -> Option<DynamicImage> {
+    let icon = get_icon()?;
+    // Resize to standard titlebar icon size (32x32) for Windows compatibility
+    debug!("Resizing icon to 32x32 for window titlebar");
+    Some(icon.resize_exact(32, 32, image::imageops::FilterType::Lanczos3))
 }
 
 pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ()> {
-    match ImageReader::new(Cursor::new(bytes)).with_guessed_format() {
-        Ok(reader) => match reader.decode() {
-            Ok(image) => {
-                debug!("Successfully decoded image");
-                Ok(image)
-            }
-            Err(error) => {
-                error!("Failed to decode image: {error}");
-                Err(())
-            }
-        },
-        Err(reader) => {
-            error!("Failed to read image: {reader}");
+    // Try with explicit ICO format first for reliability
+    let mut reader = ImageReader::new(Cursor::new(bytes));
+    reader.set_format(image::ImageFormat::Ico);
+    match reader.decode() {
+        Ok(image) => {
+            debug!("Successfully decoded icon via explicit ICO format");
+            return Ok(image);
+        }
+        Err(error) => {
+            debug!("ICO format decode failed ({error}), trying with guessed format");
+        }
+    }
+    // Fallback: let decode() auto-detect the format from content bytes
+    let fallback_reader = ImageReader::new(Cursor::new(bytes));
+    match fallback_reader.decode() {
+        Ok(image) => {
+            debug!("Successfully decoded image via format detection");
+            Ok(image)
+        }
+        Err(error) => {
+            error!("Failed to decode image: {error}");
             Err(())
         }
     }
