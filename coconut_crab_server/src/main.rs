@@ -49,7 +49,7 @@ struct AssetPrivate;
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_level(log::LevelFilter::Info)
         .init();
 
     let db_path = {

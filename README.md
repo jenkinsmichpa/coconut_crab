@@ -56,7 +56,7 @@ The client performs the following steps to encrypt a file:
   - Identifies non-default URLs
   - Identifies broken images
 - Configurable persistence through a registry entry
-- Implements a logging crate with (maybe too) verbose output
+- Implements a logging crate with verbose output
   - Client output is automatically shown in debug mode and hidden in release mode
 - Less sketchy output executable
   - Windows PE file complete with an icon and properties

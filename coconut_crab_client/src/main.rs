@@ -69,7 +69,7 @@ mod config;
 fn main() {
     if cfg!(debug_assertions) {
         env_logger::Builder::new()
-            .filter_level(log::LevelFilter::Debug)
+            .filter_level(log::LevelFilter::Info)
             .init();
     } else {
         env_logger::Builder::new()
