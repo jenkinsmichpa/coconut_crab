@@ -9,6 +9,8 @@ const ICON_WALLPAPER_FILENAME: &str = "favicon.png";
 use rust_embed::RustEmbed;
 #[derive(RustEmbed)]
 #[folder = "assets/img"]
+#[include = "favicon.ico"]
+#[include = "favicon.png"]
 struct AssetImg;
 
 pub fn get_icon() -> Option<DynamicImage> {

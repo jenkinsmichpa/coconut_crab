@@ -1,6 +1,8 @@
 # Coconut Crab
 
-![Coconut Crab Logo](coconut_crab_client/assets/img/favicon.ico "Coconut Crab Logo")
+<div align="left">
+  <img src="coconut_crab_client/assets/img/favicon.png" alt="Coconut Crab Logo" width="100" height="100"/>
+</div>
 
 # Description
 
@@ -36,7 +38,9 @@ The client performs the following steps to encrypt a file:
 
 ### Client GUI
 
-![Coconut Crab Client GUI](coconut_crab_client_gui.png "Coconut Crab Client GUI")
+<div align="left">
+  <img src="coconut_crab_client_gui.png" alt="Coconut Crab Client GUI" height="300"/>
+</div>
 
 ## Features
 
