@@ -3,13 +3,11 @@ use image::{DynamicImage, ImageReader};
 use log::{debug, error, info};
 use std::{io::Cursor, path::PathBuf};
 
-const ICON_FILENAME: &str = "favicon.ico";
-const ICON_WALLPAPER_FILENAME: &str = "favicon.png";
+const ICON_FILENAME: &str = "favicon.png";
 
 use rust_embed::RustEmbed;
 #[derive(RustEmbed)]
 #[folder = "assets/img"]
-#[include = "favicon.ico"]
 #[include = "favicon.png"]
 struct AssetImg;
 
@@ -30,20 +28,10 @@ pub fn get_icon() -> Option<DynamicImage> {
 
 pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ()> {
     let mut reader = ImageReader::new(Cursor::new(bytes));
-    reader.set_format(image::ImageFormat::Ico);
+    reader.set_format(image::ImageFormat::Png);
     match reader.decode() {
         Ok(image) => {
-            debug!("Successfully decoded icon via explicit ICO format");
-            return Ok(image);
-        }
-        Err(error) => {
-            debug!("ICO format decode failed ({error}), trying with guessed format");
-        }
-    }
-    let fallback_reader = ImageReader::new(Cursor::new(bytes));
-    match fallback_reader.decode() {
-        Ok(image) => {
-            debug!("Successfully decoded image via format detection");
+            debug!("Successfully decoded icon in PNG format");
             Ok(image)
         }
         Err(error) => {
@@ -70,7 +58,7 @@ fn save_icon_to_disk(file_path: &PathBuf) {
 }
 
 pub fn set_icon_wallpaper() {
-    let wallpaper_path = get_exe_path_dir().join(ICON_WALLPAPER_FILENAME);
+    let wallpaper_path = get_exe_path_dir().join(ICON_FILENAME);
     save_icon_to_disk(&wallpaper_path);
     match wallpaper::set_mode(wallpaper::Mode::Tile) {
         Ok(()) => {
