@@ -1,7 +1,6 @@
 import { LineEdit, Button, StandardButton, ProgressIndicator, Palette } from "std-widgets.slint";
 
 export component Main inherits Window {
-    in property <image> window-icon;
     in property <string> status-text: "Enter the decryption code below";
     in property <bool> status-progress: false;
     in-out property <string> code;
@@ -20,7 +19,7 @@ export component Main inherits Window {
     callback try-decrypt();
     always-on-top: true;
     title: "Coconut Crab";
-    icon: window-icon;
+    icon: @image-url("../assets/img/favicon.png");
     preferred-width: 530px;
     min-height: 375px;
     VerticalLayout {

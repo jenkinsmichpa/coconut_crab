@@ -55,7 +55,7 @@ mod canary;
 use canary::filter_canary;
 
 mod ui;
-use ui::{callback_handler_init, set_window_icon};
+use ui::callback_handler_init;
 
 #[macro_use]
 extern crate litcrypt2;
@@ -141,7 +141,6 @@ fn main() {
     }
 
     let ui = Main::new().expect("Failed to create Slint UI");
-    set_window_icon(&ui);
     callback_handler_init(&ui);
 
     let s_decrypt = spawn_decryption_handler(

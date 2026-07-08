@@ -4,7 +4,7 @@ use log::{debug, error, info};
 use std::{io::Cursor, path::PathBuf};
 
 const ICON_FILENAME: &str = "favicon.ico";
-const ICON_WALLPAPER_FILENAME: &str = "wallpaper.png";
+const ICON_WALLPAPER_FILENAME: &str = "favicon.png";
 
 use rust_embed::RustEmbed;
 #[derive(RustEmbed)]
@@ -24,13 +24,6 @@ pub fn get_icon() -> Option<DynamicImage> {
         .ok()?;
     debug!("Successfully got decoded icon");
     Some(image)
-}
-
-pub fn get_window_icon() -> Option<DynamicImage> {
-    let icon = get_icon()?;
-    // Resize to standard titlebar icon size (32x32) for Windows compatibility
-    debug!("Resizing icon to 32x32 for window titlebar");
-    Some(icon.resize_exact(32, 32, image::imageops::FilterType::Lanczos3))
 }
 
 pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ()> {

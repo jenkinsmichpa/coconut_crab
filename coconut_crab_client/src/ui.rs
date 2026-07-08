@@ -1,30 +1,8 @@
 use log::debug;
-use slint::{ComponentHandle, Image, Rgba8Pixel, SharedPixelBuffer};
+use slint::ComponentHandle;
 
-use crate::{Main, img::get_window_icon};
+use crate::Main;
 use coconut_crab_lib::web::validate::{validate_code, validate_code_segment};
-
-pub fn set_window_icon(ui: &Main) {
-    let Some(icon_file) = get_window_icon() else {
-        return;
-    };
-    let window_icon = icon_file.into_rgba8();
-    let rgba_data = window_icon.as_raw().to_vec();
-    let width = window_icon.width();
-    let height = window_icon.height();
-
-    let image_buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&rgba_data, width, height);
-    ui.set_window_icon(Image::from_rgba8(image_buffer));
-
-    let ui_weak = ui.as_weak();
-    let _ = slint::invoke_from_event_loop(move || {
-        if let Some(handle) = ui_weak.upgrade() {
-            let image_buffer =
-                SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&rgba_data, width, height);
-            handle.set_window_icon(Image::from_rgba8(image_buffer));
-        }
-    });
-}
 
 pub fn callback_handler_init(ui: &Main) {
     ui.on_enforce_code_segment_format(move |new_text| {
