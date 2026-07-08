@@ -14,7 +14,7 @@ This is client (coconut_crab_client) / server (coconut_crab_server) application 
 
 The following additional applications are included:
 
-- **group_docx_tool** - A tool to create and verify the authenticity of previously created DOCX files for groups
+- **group_docx_tool** - A tool to create and verify the authenticity of DOCX files for groups
 
 ### Communication
 
@@ -52,7 +52,7 @@ The client performs the following steps to encrypt a file:
 - Configurable allow and block lists of file extensions and paths
 - Configurable encryption delay time and jitter
 - Configurable canary avoidance
-  - Analyzes PDF and Office / Zip files
+  - Analyzes PDF and Office / zip files
   - Avoids hidden directories and files
   - Identifies keywords
   - Identifies non-default URLs
@@ -144,9 +144,21 @@ Victim records are stored in the `victims.db` database file created in the execu
 
 ## Compilation
 
-### Prerequisites
+### Setup Windows for Compilation
 
-- **Zig** - [zlob](https://github.com/dmtrKovalenko/zlob) requires Zig to compile.
+1. Download and install [rustup](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
+2. Download and install [cmake](https://cmake.org/download/)
+3. Download and install [Zig](https://ziglang.org/download/)
+
+### Setup Ubuntu for Compilation
+
+```bash
+sudo apt update
+sudo apt install build-essential pkg-config mingw-w64 cmake zig
+curl --proto '=https' --tlsv1.3 https://sh.rustup.rs -sSf | sh
+source $HOME/.cargo/env
+rustup target add x86_64-pc-windows-gnu
+```
 
 ### Configure HTTPS Certificates
 
@@ -180,22 +192,6 @@ openssl genrsa -out private.pem 2048
 openssl rsa -in private.pem -pubout -out public.pem
 openssl rsa -in private.pem -out private_pkcs1.pem -traditional
 openssl rsa -pubin -in public.pem -RSAPublicKey_out -out public_pkcs1.pem -traditional
-```
-
-### Setup Windows for Compilation
-
-1. Download and install [rustup](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
-2. Download and install [cmake](https://cmake.org/download/)
-3. Download and install [Zig](https://ziglang.org/download/)
-
-### Setup Ubuntu for Compilation
-
-```bash
-sudo apt update
-sudo apt install build-essential pkg-config mingw-w64 cmake zig
-curl --proto '=https' --tlsv1.3 https://sh.rustup.rs -sSf | sh
-source $HOME/.cargo/env
-rustup target add x86_64-pc-windows-gnu
 ```
 
 # Support
