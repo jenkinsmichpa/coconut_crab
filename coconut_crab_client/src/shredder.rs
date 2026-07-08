@@ -65,7 +65,7 @@ pub fn shred(receiver: Receiver<Arc<PathBuf>>) -> thread::JoinHandle<()> {
             let mut remaining = file_size;
             while remaining > 0 {
                 let chunk_size = std::cmp::min(remaining, SHRED_BUFFER_SIZE as u64);
-                let data = &mut buffer[..usize::try_from(chunk_size).unwrap()]; // chunk_size <= SHRED_BUFFER_SIZE = 65536 so well within max usize
+                let data = &mut buffer[..usize::try_from(chunk_size).unwrap()]; // chunk_size <= SHRED_BUFFER_SIZE = 65536 = well within max usize
                 rng_cheap.fill_bytes(data);
                 if let Err(error) = file.write_all(data) {
                     error!("Error writing random data to file: {error}");

@@ -89,8 +89,10 @@ As this is an application for education and not real-world use, there were sever
   - Validation can be enabled through the configuration
 - The client must request a public key from the server before it can begin (to create artifacts for students)
   - By default, the public key is written to the victim hard drive. This can be disabled through the configuration.
+- Files are encrypted with a single ChaCha20-Poly1305 AEAD operation per file rather than a streaming chunked format
+  - This keeps the on-disk format simple for students to determine, but requires the entire file to be buffered in memory.
 
-**I am not a software engineer and this is my first time with Rust. Beware of data loss!**
+**I am not a software engineer and this was my first time with Rust. Beware of data loss!**
 
 # Usage
 

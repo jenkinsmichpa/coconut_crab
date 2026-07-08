@@ -40,7 +40,7 @@ pub fn initialize_client(
 }
 
 #[derive(Clone, Debug)]
-pub struct ThreadNums {
+pub struct ThreadCounts {
     pub walk: usize,
     pub shred: usize,
     pub encrypt: usize,
@@ -48,8 +48,8 @@ pub struct ThreadNums {
     pub canary: usize,
 }
 
-pub fn get_thread_nums() -> ThreadNums {
-    let num_threads = match available_parallelism() {
+pub fn get_thread_counts() -> ThreadCounts {
+    let thread_count = match available_parallelism() {
         Ok(suggested) => {
             debug!("Successfully got suggested number of threads: {suggested}");
             suggested.get()
@@ -64,38 +64,37 @@ pub fn get_thread_nums() -> ThreadNums {
         config::ANALYZE_PDF || config::ANALYZE_OFFICE_ZIP || config::AVOID_BROKEN_IMAGES;
     let shred_active = !config::ANALYZE_MODE;
 
-    let num_walk_threads = if num_threads >= 4 {
-        (num_threads / 4).max(2)
+    let walk_count = if thread_count >= 4 {
+        (thread_count / 4).max(2)
     } else {
         1
     };
-    let num_canary_threads = if canary_active {
-        (num_threads / 6).max(1)
+    let canary_count = if canary_active {
+        (thread_count / 6).max(1)
     } else {
         0
     };
-    let num_shred_threads = if shred_active {
-        (num_threads / 6).max(1)
+    let shred_count = if shred_active {
+        (thread_count / 6).max(1)
     } else {
         0
     };
 
-    let num_encrypt_threads = num_threads
-        .saturating_sub(num_walk_threads + num_canary_threads + num_shred_threads)
+    let encrypt_count = thread_count
+        .saturating_sub(walk_count + canary_count + shred_count)
         .max(1);
 
-    let num_decrypt_threads = num_threads.saturating_sub(num_walk_threads).max(1);
+    let decrypt_count = thread_count.saturating_sub(walk_count).max(1);
 
     debug!(
-        "Using {num_walk_threads} walk, {num_canary_threads} canary, \
-         {num_encrypt_threads} encrypt, {num_shred_threads} shred, {num_decrypt_threads} decrypt"
+        "Using {walk_count} walk, {canary_count} canary, {encrypt_count} encrypt, {shred_count} shred, {decrypt_count} decrypt"
     );
 
-    ThreadNums {
-        walk: num_walk_threads,
-        shred: num_shred_threads,
-        encrypt: num_encrypt_threads,
-        decrypt: num_decrypt_threads,
-        canary: num_canary_threads,
+    ThreadCounts {
+        walk: walk_count,
+        shred: shred_count,
+        encrypt: encrypt_count,
+        decrypt: decrypt_count,
+        canary: canary_count,
     }
 }

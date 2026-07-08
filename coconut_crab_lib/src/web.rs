@@ -39,8 +39,8 @@ pub mod client {
     use log::debug;
     use std::{sync::LazyLock, time::Duration};
     use ureq::{
-        Agent,
         tls::{Certificate, RootCerts, TlsConfig},
+        Agent,
     };
 
     use crate::web::client_tls::get_ca_public_key;
@@ -104,11 +104,8 @@ pub mod server_tls {
     use rust_embed::RustEmbed;
     #[derive(RustEmbed)]
     #[folder = "assets/cert"]
-    #[exclude = "ca-cert.pem"]
-    #[exclude = "ca-key.pem"]
     #[include = "cert.pem"]
     #[include = "key.pem"]
-    #[exclude = "server.pem"]
     struct AssetCertPriv;
 
     pub fn get_tls_public_key() -> Vec<u8> {
@@ -131,10 +128,6 @@ pub mod client_tls {
     #[derive(RustEmbed)]
     #[folder = "assets/cert"]
     #[include = "ca-cert.pem"]
-    #[exclude = "ca-key.pem"]
-    #[exclude = "cert.pem"]
-    #[exclude = "key.pem"]
-    #[exclude = "server.pem"]
     struct AssetCertPub;
 
     pub fn get_ca_public_key() -> Cow<'static, [u8]> {
