@@ -79,10 +79,10 @@ As this is an application for education and not real-world use, there were sever
   - The server is not resistant to replay attacks
 - By default, the application is configured to use publicly known RSA key pairs for encryption
 - By default, the application is configured not to validate HTTPS certificates
-- By default, the public key is written to the victim hard drive.
+- By default, the public key is written to the victim hard drive
 - The client requests a public key from the server before it can begin (creating artifacts for students)
 - Files are encrypted with a single ChaCha20-Poly1305 AEAD operation per file rather than a streaming chunked format
-  - This keeps the on-disk format simple for students to determine, but requires the entire file to be buffered in memory.
+  - This keeps the on-disk format simple for students to determine, but requires the entire file to be buffered in memory
 
 **I am not a software engineer and this was my first time with Rust. Beware of data loss!**
 
