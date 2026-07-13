@@ -5681,9 +5681,9 @@ checksum = "1d8f70e07b9c3962945a74e59ca1c511bba65b6419468acc217c457d93f3c740"
 
 [[package]]
 name = "purecrypto"
-version = "0.6.26"
+version = "0.6.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "890628eba58542dcecb74c285c02ec029a7de7ba71ba362dcd01390eef070722"
+checksum = "8369f23d6e0e8b8d98b6fa96401a3b2d517ab2d1ffc876a9e4a18c9af57a289e"
 
 [[package]]
 name = "pxfm"
