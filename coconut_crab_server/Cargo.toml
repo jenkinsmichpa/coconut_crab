@@ -31,6 +31,6 @@ purecrypto = { version = "0.6.26", default-features = false, features = [
   "std",
 ] }
 rust-embed = { version = "8.12.0", features = ["compression"] }
-toasty = { version = "0.8.0", features = ["turso"] }
+toasty = { version = "0.9.0", features = ["turso"] }
 tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
 rustls = { version = "0.23.41", features = ["aws-lc-rs"] }
