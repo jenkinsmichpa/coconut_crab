@@ -1,7 +1,7 @@
 [package]
 name = "group_docx_tool"
 version = "0.1.0"
-authors = ["Michael Jenkins <jenkinsmichpa@gmail.com>"]
+authors = ["Michael Jenkins <me@jenkinsmichpa.com>"]
 edition = "2024"
 description = "Generates and verifies randomish docx files for given group numbers"
 license = "MIT"
