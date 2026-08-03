@@ -27,11 +27,17 @@ pub fn get_icon() -> Option<DynamicImage> {
 }
 
 pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ()> {
-    let mut reader = ImageReader::new(Cursor::new(bytes));
-    reader.set_format(image::ImageFormat::Png);
+    let reader = ImageReader::new(Cursor::new(bytes));
+    let reader = match reader.with_guessed_format() {
+        Ok(reader) => reader,
+        Err(error) => {
+            error!("Failed to guess image format: {error}");
+            return Err(());
+        }
+    };
     match reader.decode() {
         Ok(image) => {
-            debug!("Successfully decoded icon in PNG format");
+            debug!("Successfully decoded image");
             Ok(image)
         }
         Err(error) => {

@@ -52,6 +52,7 @@ pub fn callback_handler_init(ui: &Main) {
             }
         } else {
             debug!("One or more code segment are invalid");
+            ui.set_code_valid(false);
         }
     });
 }

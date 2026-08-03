@@ -39,8 +39,8 @@ pub mod client {
     use log::debug;
     use std::{sync::LazyLock, time::Duration};
     use ureq::{
-        tls::{Certificate, RootCerts, TlsConfig},
         Agent,
+        tls::{Certificate, RootCerts, TlsConfig},
     };
 
     use crate::web::client_tls::get_ca_public_key;

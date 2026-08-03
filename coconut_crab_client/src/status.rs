@@ -1,8 +1,12 @@
 use csv::{ReaderBuilder, WriterBuilder};
 use log::{debug, error, info};
-use rand::{distr::Alphanumeric, rngs::StdRng, RngExt, SeedableRng};
+use rand::{RngExt, SeedableRng, distr::Alphanumeric, rngs::StdRng};
 use serde::{Deserialize, Serialize};
-use std::{fs::File, path::Path, sync::LazyLock};
+use std::{
+    fs::{self, File},
+    path::Path,
+    sync::LazyLock,
+};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Status {
@@ -52,13 +56,19 @@ pub fn import_status_csv(path: &Path) -> Option<Status> {
 }
 
 pub fn export_status_csv(path: &Path, status: &Status) {
-    let file = File::create(path.join(&*STATUS_FILENAME))
-        .expect("Error accessing filesystem to write status CSV");
+    let status_file_path = path.join(&*STATUS_FILENAME);
+    let temp_file_path = path.join(format!("{}.tmp", *STATUS_FILENAME));
+
+    let file =
+        File::create(&temp_file_path).expect("Error accessing filesystem to write status CSV");
     let mut writer = WriterBuilder::new().has_headers(true).from_writer(file);
     writer
         .serialize(status)
         .expect("Failed to serialize status");
-    writer.flush().expect("Failed to flush status to file");
+    let file = writer.into_inner().expect("Failed to flush status to file");
+    file.sync_all().expect("Failed to sync status to file");
+    drop(file);
+    fs::rename(&temp_file_path, &status_file_path).expect("Failed to replace status CSV");
 }
 
 pub fn create_status() -> Status {

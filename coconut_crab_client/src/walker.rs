@@ -1,10 +1,9 @@
-use crossbeam_channel::Sender;
 use log::{debug, error};
 use rand::{SeedableRng, rngs::SmallRng, seq::SliceRandom};
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, mpsc::SyncSender},
     thread,
 };
 use zlob::walk::{WalkBuilder, WalkEntry, WalkFlags, WalkState};
@@ -15,7 +14,7 @@ use coconut_crab_lib::file::get_lowercase_extension;
 const WALK_COORDINATOR_STACK_SIZE: usize = 8 << 20;
 
 pub fn walk_with_exts(
-    sender: Sender<Arc<PathBuf>>,
+    sender: SyncSender<Arc<PathBuf>>,
     allow_exts: Option<Vec<String>>,
     block_exts: Option<Vec<String>>,
     threads: usize,
@@ -28,7 +27,9 @@ pub fn walk_with_exts(
             let allow_exts = allow_exts
                 .as_deref()
                 .or(Some(config::ALLOWLIST_EXTENSIONS.as_slice()));
-            let block_exts = block_exts.as_deref();
+            let block_exts = block_exts
+                .as_deref()
+                .or(config::BLOCKLIST_EXTENSIONS.as_deref());
 
             for starting_path in config::ALLOWLIST_PATHS.iter() {
                 let mut builder = match WalkBuilder::new(starting_path) {
@@ -81,7 +82,7 @@ pub fn walk_with_exts(
 }
 
 pub fn random_walk_with_exts(
-    sender: Sender<Arc<PathBuf>>,
+    sender: SyncSender<Arc<PathBuf>>,
     allow_exts: Option<Vec<String>>,
     block_exts: Option<Vec<String>>,
     threads: usize,
@@ -94,7 +95,9 @@ pub fn random_walk_with_exts(
             let allow_exts = allow_exts
                 .as_deref()
                 .or(Some(config::ALLOWLIST_EXTENSIONS.as_slice()));
-            let block_exts = block_exts.as_deref();
+            let block_exts = block_exts
+                .as_deref()
+                .or(config::BLOCKLIST_EXTENSIONS.as_deref());
             let mut found_paths: Vec<PathBuf> = vec![];
 
             for starting_path in config::ALLOWLIST_PATHS.iter() {
@@ -139,15 +142,13 @@ pub fn random_walk_with_exts(
                 );
 
                 for entry in results.iter() {
+                    if is_blocked(entry.path()) {
+                        debug!("Blocklist contains entry: {}", entry.path().display());
+                        continue;
+                    }
+
                     if entry.is_file() {
                         let entry_path = entry.path().to_path_buf();
-
-                        if let Some(blocklist_paths) = config::BLOCKLIST_PATHS.as_ref()
-                            && blocklist_paths.contains(&entry_path)
-                        {
-                            debug!("Blocklist contains entry: {}", entry_path.display());
-                            continue;
-                        }
 
                         if file_filter(&entry_path, allow_exts, block_exts) {
                             debug!("Entry matched filter: {}", entry_path.display());
@@ -179,17 +180,18 @@ pub fn random_walk_with_exts(
 
 fn process_walk_entry(
     entry: WalkEntry<'_>,
-    sender: &Sender<Arc<PathBuf>>,
+    sender: &SyncSender<Arc<PathBuf>>,
     allow_exts: Option<&[String]>,
     block_exts: Option<&[String]>,
 ) -> WalkState {
+    if entry.is_dir() && is_blocked(entry.path()) {
+        return WalkState::SkipDir;
+    }
+
     if entry.is_file() {
         let entry_path = entry.path().to_path_buf();
 
-        if let Some(blocklist_paths) = config::BLOCKLIST_PATHS.as_ref()
-            && blocklist_paths.contains(&entry_path)
-        {
-            debug!("Blocklist contains entry: {}", entry_path.display());
+        if is_blocked(&entry_path) {
             return WalkState::Continue;
         }
 
@@ -204,6 +206,18 @@ fn process_walk_entry(
     }
 
     WalkState::Continue
+}
+
+fn is_blocked(entry_path: &Path) -> bool {
+    if let Some(blocklist_paths) = config::BLOCKLIST_PATHS.as_ref() {
+        for blocked in blocklist_paths {
+            if entry_path == blocked.as_path() || entry_path.starts_with(blocked) {
+                debug!("Blocklist contains entry: {}", entry_path.display());
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn file_filter(

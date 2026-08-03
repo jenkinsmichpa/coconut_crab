@@ -4,7 +4,7 @@ use std::{path::Path, thread::available_parallelism};
 use crate::{
     comm::register,
     config,
-    status::{create_status, export_status_csv, import_status_csv, Status},
+    status::{Status, create_status, export_status_csv, import_status_csv},
 };
 
 pub fn initialize_client(
@@ -19,15 +19,17 @@ pub fn initialize_client(
         || {
             warn!("Existing status not imported");
             let new_status = create_status();
-            register(
+            if let Err(error) = register(
                 server_fqdn,
                 server_port,
                 &new_status,
                 preshared_secret,
                 https,
                 verify_server,
-            )
-            .expect("Failed to register with server - cannot continue");
+            ) {
+                error!("Failed to register with server - cannot continue: {error}");
+                std::process::exit(1);
+            }
             export_status_csv(exe_path_dir, &new_status);
             debug!("Created new status: {new_status:?}");
             new_status

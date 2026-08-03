@@ -54,7 +54,7 @@ async fn main() {
 
     let db_path = {
         let exe_directory_path = get_exe_path_dir();
-        format!("turso:{}/victims.db", exe_directory_path.to_string_lossy())
+        format!("sqlite:{}/victims.db", exe_directory_path.to_string_lossy())
     };
     debug!("Database path: {db_path}");
 
@@ -127,7 +127,7 @@ async fn main() {
     debug!("Socket Address Configured");
 
     if config::HTTPS {
-        rustls::crypto::aws_lc_rs::default_provider()
+        rustls::crypto::ring::default_provider()
             .install_default()
             .expect("Failed to install rustls crypto provider");
         let tls_config = RustlsConfig::from_pem(get_tls_public_key(), get_tls_private_key())

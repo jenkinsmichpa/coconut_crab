@@ -2,6 +2,7 @@ use hex::{FromHex, decode};
 use log::{debug, error, info};
 use purecrypto::rsa::BoxedRsaPublicKey;
 use std::{fs, path::PathBuf, str};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{crypto::decrypt_string, status::Status};
 use coconut_crab_lib::{
@@ -53,10 +54,20 @@ pub fn download_asym_pub_key(
     debug!("Asymmetric public key download URL: {url}");
     let content = web_get_recv_bytes(&url, verify_server)?;
     debug!("Response content bytes: {content:?}");
-    let public_key = BoxedRsaPublicKey::from_spki_pem(
-        str::from_utf8(&content).expect("Failed to parse PEM key string"),
-    )
-    .expect("Failed to parse PEM key");
+    let pem = match str::from_utf8(&content) {
+        Ok(pem) => pem,
+        Err(error) => {
+            error!("Server response is not valid UTF-8: {error}");
+            return None;
+        }
+    };
+    let public_key = match BoxedRsaPublicKey::from_spki_pem(pem) {
+        Ok(key) => key,
+        Err(error) => {
+            error!("Failed to parse PEM public key from server response: {error}");
+            return None;
+        }
+    };
     debug!("Asymmetric public key downloaded: {public_key:?}");
     Some(public_key)
 }
@@ -170,7 +181,7 @@ fn download_sym_key(
     secret: &str,
     https: bool,
     verify_server: bool,
-) -> Option<[u8; 32]> {
+) -> Option<Zeroizing<[u8; 32]>> {
     let identifier = if https { "https" } else { "http" };
     let url = format!(
         "{identifier}://{server_fqdn}:{port}{}",
@@ -185,12 +196,13 @@ fn download_sym_key(
         proof: create_proof(&proof_source, secret),
     };
     debug!("Symmetric key download data: {downloadsymkey:?}");
-    let Some(content) = web_post_send_json_recv_text(&url, &downloadsymkey, verify_server) else {
+    let Some(mut content) = web_post_send_json_recv_text(&url, &downloadsymkey, verify_server)
+    else {
         info!("Server did not respond to symmetric key request");
         return None;
     };
     debug!("Response content text: {content}");
-    let sym_key = match <[u8; 32]>::from_hex(content) {
+    let sym_key = match <[u8; 32]>::from_hex(content.as_bytes()) {
         Ok(key) => {
             debug!("Successfully got symmetric key from response: {key:?}");
             key
@@ -200,7 +212,8 @@ fn download_sym_key(
             return None;
         }
     };
-    Some(sym_key)
+    content.zeroize();
+    Some(Zeroizing::new(sym_key))
 }
 
 pub fn get_sym_key(
@@ -211,7 +224,7 @@ pub fn get_sym_key(
     preshared_secret: &str,
     https: bool,
     verify_server: bool,
-) -> Option<[u8; 32]> {
+) -> Option<Zeroizing<[u8; 32]>> {
     download_sym_key(
         server_fqdn,
         server_port,

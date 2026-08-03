@@ -1,24 +1,27 @@
-use crossbeam_channel::Receiver;
 use log::{debug, error, info, warn};
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::{
     fs::{self, File},
     io::{Seek, SeekFrom, Write},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex, mpsc::Receiver},
     thread,
 };
 
 const SHRED_BUFFER_SIZE: usize = 64 * 1024;
 
-pub fn shred(receiver: Receiver<Arc<PathBuf>>) -> thread::JoinHandle<()> {
+pub fn shred(receiver: Arc<Mutex<Receiver<Arc<PathBuf>>>>) -> thread::JoinHandle<()> {
     debug!("Starting shredder thread");
     thread::spawn(move || {
         let mut rng_cheap = SmallRng::from_rng(&mut rand::rng());
         debug!("Created cheap random number generator");
 
         loop {
-            let file_path = match receiver.recv() {
+            let received = receiver
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .recv();
+            let file_path = match received {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path

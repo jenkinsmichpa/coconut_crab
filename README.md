@@ -99,9 +99,9 @@ Variable | Type | Summary
 SERVER_PORT | u16 | remote web server port (must match server)
 SERVER_FQDN | LazyLock\<String\> | remote web server hostname or IP address
 ALLOWLIST_PATHS | LazyLock\<Vec\<PathBuf\>\> | paths to target
-BLOCKLIST_PATHS | Option\<Vec\<PathBuf\>\> | paths to avoid (optional)
+BLOCKLIST_PATHS | LazyLock\<Option\<Vec\<PathBuf\>\>\> | paths to avoid (optional; a directory blocks its entire contents)
 ALLOWLIST_EXTENSIONS | LazyLock\<Vec\<String\>\> | file extensions to target (optional)
-BLOCKLIST_EXTENSIONS | Option\<Vec\<String\>\> | file extensions to avoid (optional)
+BLOCKLIST_EXTENSIONS | LazyLock\<Option\<Vec\<String\>\>\> | file extensions to avoid (optional)
 ENCRYPTED_EXTENSION | LazyLock\<String\> | file extension applied to encrypted files
 SAVE_PUBLIC_KEY_TO_DISK | bool | should client save public encryption key to disk
 SET_WALLPAPER | bool | should the client set desktop wallpaper to the application icon

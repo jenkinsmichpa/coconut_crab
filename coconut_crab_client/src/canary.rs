@@ -1,11 +1,13 @@
-use crossbeam_channel::{Receiver, Sender};
 use log::{debug, error, info, warn};
 use regex::Regex;
 use std::{
     fs::File,
     io::Read,
     path::PathBuf,
-    sync::{Arc, LazyLock},
+    sync::{
+        Arc, LazyLock, Mutex,
+        mpsc::{Receiver, SyncSender},
+    },
     thread,
 };
 use zip::read::ZipArchive;
@@ -38,21 +40,25 @@ static SUSPICIOUS_KEYWORDS: LazyLock<[String; 9]> = LazyLock::new(|| {
 const OFFICE_FILE_DOMAINS: [&str; 4] =
     ["microsoft.com", "openxmlformats.org", "w3.org", "purl.org"];
 const OFFICE_ZIP_EXTENSIONS: [&str; 4] = ["zip", "docx", "xlsx", "pptx"];
-const IMAGE_EXTENSIONS: [&str; 15] = [
-    "bmp", "dds", "ff", "gif", "hdr", "ico", "jpg", "jpeg", "exr", "png", "pnm", "qoi", "tga",
-    "tiff", "tif",
+const IMAGE_EXTENSIONS: [&str; 17] = [
+    "avif", "bmp", "dds", "ff", "gif", "hdr", "ico", "jpg", "jpeg", "exr", "png", "pnm", "qoi",
+    "tga", "tiff", "tif", "webp",
 ];
 const MAX_IMAGE_SIZE_MB: u64 = 2;
 const MAX_FILE_SIZE_KB: u64 = 1024;
 
 pub fn filter_canary(
-    receiver: Receiver<Arc<PathBuf>>,
-    sender: Sender<Arc<PathBuf>>,
+    receiver: Arc<Mutex<Receiver<Arc<PathBuf>>>>,
+    sender: SyncSender<Arc<PathBuf>>,
 ) -> thread::JoinHandle<()> {
     debug!("Starting canary filter thread");
     thread::spawn(move || {
         loop {
-            let file_path = match receiver.recv() {
+            let received = receiver
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .recv();
+            let file_path = match received {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path
@@ -63,7 +69,7 @@ pub fn filter_canary(
                 }
             };
 
-            if analyze_keywords(&file_path.to_string_lossy()) {
+            if config::AVOID_KEYWORDS && analyze_keywords(&file_path.to_string_lossy()) {
                 info!("File path contained keyword: {file_path:?}");
                 continue;
             }
@@ -86,7 +92,7 @@ pub fn filter_canary(
     })
 }
 
-fn filter_pdf(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
+fn filter_pdf(sender: &SyncSender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
     debug!("Analyzing file as a PDF: {file_path:?}");
 
     let file_data = match get_file_data(file_path, MAX_FILE_SIZE_KB * 1024) {
@@ -116,7 +122,7 @@ fn filter_pdf(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
     }
 }
 
-fn filter_office_zip(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
+fn filter_office_zip(sender: &SyncSender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
     debug!("Analyzing file as a ZIP or Office document: {file_path:?}");
     if let Ok(size) = get_file_size(file_path) {
         if size > MAX_FILE_SIZE_KB * 1024 {
@@ -152,7 +158,7 @@ fn filter_office_zip(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
     }
 }
 
-fn filter_broken_image(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
+fn filter_broken_image(sender: &SyncSender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
     let file_data = match get_file_data(file_path, MAX_IMAGE_SIZE_MB * 1024 * 1024) {
         Ok(data) => {
             debug!("No error during file data retrieval {file_path:?}");
@@ -290,7 +296,11 @@ fn analyze_zip_file(
             );
 
             let mut zipped_file_data = Vec::new();
-            match entry.read_to_end(&mut zipped_file_data) {
+            match entry
+                .by_ref()
+                .take(zipped_file_max_size + 1)
+                .read_to_end(&mut zipped_file_data)
+            {
                 Ok(size) => {
                     debug!(
                         "Successfully read {} bytes from zipped file: {}",
@@ -302,6 +312,15 @@ fn analyze_zip_file(
                     error!("Error reading zipped file: {error}");
                     return Err(());
                 }
+            }
+
+            if zipped_file_data.len() as u64 > zipped_file_max_size {
+                debug!(
+                    "Entry decompressed beyond max size ({}), skipping: {}",
+                    zipped_file_data.len(),
+                    entry.name()
+                );
+                continue;
             }
 
             if analyze_file_data(&zipped_file_data, avoid_keywords, avoid_urls) {

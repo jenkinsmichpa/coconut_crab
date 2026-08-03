@@ -18,10 +18,18 @@ categories = ["simulation", "security"]
 
 [dependencies]
 coconut_crab_lib = { path = "../coconut_crab_lib" }
-axum = "0.8.9"
+axum = { version = "0.8.9", default-features = false, features = [
+  "json",
+  "tokio",
+] }
 axum-embed = "0.1.0"
-axum-server = { version = "0.8.0", features = ["tls-rustls"] }
-env_logger = "0.11.11"
+axum-server = { version = "0.8.0", default-features = false, features = [
+  "tls-rustls-no-provider",
+] }
+env_logger = { version = "0.11.11", default-features = false, features = [
+  "auto-color",
+  "humantime",
+] }
 hex = "0.4.3"
 log = "0.4.33"
 rand = "0.10.2"
@@ -30,7 +38,18 @@ purecrypto = { version = "0.6.26", default-features = false, features = [
   "der",
   "std",
 ] }
-rust-embed = { version = "8.12.0", features = ["compression"] }
-toasty = { version = "0.9.0", features = ["turso"] }
-tokio = { version = "1.52.3", features = ["rt-multi-thread"] }
-rustls = { version = "0.23.41", features = ["aws-lc-rs"] }
+rust-embed = { version = "8.12.0", default-features = false, features = [
+  "compression",
+] }
+toasty = { version = "0.9.0", features = ["sqlite"] }
+tokio = { version = "1.52.3", features = [
+  "macros",
+  "rt-multi-thread",
+  "signal",
+] }
+rustls = { version = "0.23.41", default-features = false, features = [
+  "ring",
+  "std",
+  "tls12",
+  "logging",
+] }

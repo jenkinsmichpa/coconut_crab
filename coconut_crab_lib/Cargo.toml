@@ -18,9 +18,14 @@ categories = ["simulation", "security"]
 
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
-regex = "1.13.0"
+regex = { version = "1.13.0", default-features = false, features = [
+  "std",
+  "perf",
+] }
 log = "0.4.33"
-rust-embed = { version = "8.12.0", features = ["include-exclude"] }
+rust-embed = { version = "8.12.0", default-features = false, features = [
+  "include-exclude",
+] }
 ureq = { version = "3.3.0", default-features = false, features = [
   "json",
   "rustls",
