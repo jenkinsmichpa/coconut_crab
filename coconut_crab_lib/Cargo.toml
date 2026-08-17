@@ -17,8 +17,8 @@ keywords = [
 categories = ["simulation", "security"]
 
 [dependencies]
-serde = { version = "1.0.228", features = ["derive"] }
-regex = { version = "1.13.0", default-features = false, features = [
+serde = { version = "1.0.229", features = ["derive"] }
+regex = { version = "1.13.1", default-features = false, features = [
   "std",
   "perf",
 ] }
@@ -26,12 +26,12 @@ log = "0.4.33"
 rust-embed = { version = "8.12.0", default-features = false, features = [
   "include-exclude",
 ] }
-ureq = { version = "3.3.0", default-features = false, features = [
+ureq = { version = "3.4.0", default-features = false, features = [
   "json",
   "rustls",
 ] }
 hex = "0.4.3"
-purecrypto = { version = "0.6.26", default-features = false, features = [
+purecrypto = { version = "0.7.0", default-features = false, features = [
   "hash",
   "std",
 ] }

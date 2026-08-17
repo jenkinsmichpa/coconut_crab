@@ -1,27 +1,25 @@
+use flume::Receiver;
 use log::{debug, error, info, warn};
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::{
+    cmp::min,
     fs::{self, File},
     io::{Seek, SeekFrom, Write},
     path::PathBuf,
-    sync::{Arc, Mutex, mpsc::Receiver},
+    sync::Arc,
     thread,
 };
 
 const SHRED_BUFFER_SIZE: usize = 64 * 1024;
 
-pub fn shred(receiver: Arc<Mutex<Receiver<Arc<PathBuf>>>>) -> thread::JoinHandle<()> {
+pub fn shred(receiver: Receiver<Arc<PathBuf>>) -> thread::JoinHandle<()> {
     debug!("Starting shredder thread");
     thread::spawn(move || {
         let mut rng_cheap = SmallRng::from_rng(&mut rand::rng());
         debug!("Created cheap random number generator");
 
         loop {
-            let received = receiver
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .recv();
-            let file_path = match received {
+            let file_path = match receiver.recv() {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path
@@ -67,7 +65,7 @@ pub fn shred(receiver: Arc<Mutex<Receiver<Arc<PathBuf>>>>) -> thread::JoinHandle
             let mut buffer = vec![0u8; SHRED_BUFFER_SIZE];
             let mut remaining = file_size;
             while remaining > 0 {
-                let chunk_size = std::cmp::min(remaining, SHRED_BUFFER_SIZE as u64);
+                let chunk_size = min(remaining, SHRED_BUFFER_SIZE as u64);
                 let data = &mut buffer[..usize::try_from(chunk_size).unwrap()]; // chunk_size <= SHRED_BUFFER_SIZE = 65536 = well within max usize
                 rng_cheap.fill_bytes(data);
                 if let Err(error) = file.write_all(data) {

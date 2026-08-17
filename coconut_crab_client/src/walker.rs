@@ -1,9 +1,11 @@
+use flume::Sender;
 use log::{debug, error};
 use rand::{SeedableRng, rngs::SmallRng, seq::SliceRandom};
 use std::{
+    ffi::OsStr,
     panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
-    sync::{Arc, mpsc::SyncSender},
+    sync::Arc,
     thread,
 };
 use zlob::walk::{WalkBuilder, WalkEntry, WalkFlags, WalkState};
@@ -14,7 +16,7 @@ use coconut_crab_lib::file::get_lowercase_extension;
 const WALK_COORDINATOR_STACK_SIZE: usize = 8 << 20;
 
 pub fn walk_with_exts(
-    sender: SyncSender<Arc<PathBuf>>,
+    sender: Sender<Arc<PathBuf>>,
     allow_exts: Option<Vec<String>>,
     block_exts: Option<Vec<String>>,
     threads: usize,
@@ -82,7 +84,7 @@ pub fn walk_with_exts(
 }
 
 pub fn random_walk_with_exts(
-    sender: SyncSender<Arc<PathBuf>>,
+    sender: Sender<Arc<PathBuf>>,
     allow_exts: Option<Vec<String>>,
     block_exts: Option<Vec<String>>,
     threads: usize,
@@ -180,7 +182,7 @@ pub fn random_walk_with_exts(
 
 fn process_walk_entry(
     entry: WalkEntry<'_>,
-    sender: &SyncSender<Arc<PathBuf>>,
+    sender: &Sender<Arc<PathBuf>>,
     allow_exts: Option<&[String]>,
     block_exts: Option<&[String]>,
 ) -> WalkState {
@@ -226,12 +228,12 @@ fn file_filter(
     blocklist_extensions: Option<&[String]>,
 ) -> bool {
     let mut file_match = true;
+    let lowercase_extension = get_lowercase_extension(file_path);
 
     if let Some(allowlist_extensions) = allowlist_extensions {
         debug!("Applying allowlist to file: {}", file_path.display());
-        if allowlist_extensions.contains(&get_lowercase_extension(file_path)) {
+        if allowlist_extensions.contains(&lowercase_extension) {
             debug!("Allowlist contains extension: {}", file_path.display());
-            file_match = true;
         } else {
             debug!(
                 "Allowlist does not contain extension: {}",
@@ -245,7 +247,7 @@ fn file_filter(
 
     if let Some(blocklist_extensions) = blocklist_extensions {
         debug!("Applying blocklist to file: {}", file_path.display());
-        if blocklist_extensions.contains(&get_lowercase_extension(file_path)) {
+        if blocklist_extensions.contains(&lowercase_extension) {
             debug!("Blocklist contains file extension: {}", file_path.display());
             file_match = false;
         } else {
@@ -261,7 +263,7 @@ fn file_filter(
     match file_path.file_name() {
         Some(name) => {
             debug!("Successfully got filename: {}", name.to_string_lossy());
-            if name.to_string_lossy() == *STATUS_FILENAME {
+            if name == OsStr::new(STATUS_FILENAME.as_str()) {
                 debug!("File is {}. Avoiding ouroboros.", *STATUS_FILENAME);
                 file_match = false;
             }

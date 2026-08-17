@@ -1,5 +1,5 @@
 use log::{debug, error, warn};
-use std::{path::Path, thread::available_parallelism};
+use std::{cmp::max, path::Path, process::exit, thread::available_parallelism};
 
 use crate::{
     comm::register,
@@ -28,7 +28,7 @@ pub fn initialize_client(
                 verify_server,
             ) {
                 error!("Failed to register with server - cannot continue: {error}");
-                std::process::exit(1);
+                exit(1);
             }
             export_status_csv(exe_path_dir, &new_status);
             debug!("Created new status: {new_status:?}");
@@ -99,4 +99,8 @@ pub fn get_thread_counts() -> ThreadCounts {
         decrypt: decrypt_count,
         canary: canary_count,
     }
+}
+
+pub fn channel_capacity(consumers: usize) -> usize {
+    max(consumers * 2, 64)
 }

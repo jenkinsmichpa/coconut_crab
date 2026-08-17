@@ -1,7 +1,9 @@
+use std::env;
+
 fn main() {
     slint_build::compile("ui/main.slint").expect("Failed to get Slint UI file");
 
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         embed_manifest::embed_manifest(embed_manifest::new_manifest("CoconutCrab.Client"))
             .expect("unable to embed Windows manifest");
 

@@ -3,7 +3,7 @@ use hex::encode;
 use purecrypto::hash::{Digest, Sha256};
 use rand::seq::SliceRandom;
 use rand::{SeedableRng, rngs::SmallRng};
-use std::fs;
+use std::{fs, string};
 use ureq::get;
 
 mod config;
@@ -81,7 +81,7 @@ fn main() {
             let random_words: Vec<String> = indices
                 .iter()
                 .map(|&i| &words[i])
-                .map(std::string::ToString::to_string)
+                .map(string::ToString::to_string)
                 .collect();
 
             let mut file_content = random_words.join(" ");
