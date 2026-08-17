@@ -22,7 +22,7 @@ coconut_crab_lib = { path = "../coconut_crab_lib" }
 auto-launch = "0.6.0"
 hex = "0.4.3"
 rand = "0.10.2"
-purecrypto = { version = "0.6.26", default-features = false, features = [
+purecrypto = { version = "0.7.0", default-features = false, features = [
   "rsa",
   "cipher",
   "der",
