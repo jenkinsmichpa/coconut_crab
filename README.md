@@ -34,7 +34,7 @@ The client performs the following steps to encrypt a file:
 1. Walk the filesystem
 2. Analyze files to avoid canaries (optional)
 3. Create a new encrypted file
-4. Overwrite and delete the existing plaintext file
+4. Overwrite and delete the existing cleartext file
 
 ### Client GUI
 
