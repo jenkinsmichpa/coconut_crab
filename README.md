@@ -61,7 +61,6 @@ The client performs the following steps to encrypt a file:
 - Configurable setting of desktop wallpaper
 - Implements a logging crate with optional verbose output
 - Pretty looking and self contained Windows executables
-- All persistent application information is stored in a CSV for simple viewing and modification
 - Parallel optimized filesystem walking via [zlob](https://github.com/dmtrKovalenko/zlob)
 - Reaps benefits being written largely in Rust including
   - AV detection and RE are more difficult
