@@ -6,9 +6,8 @@ use log::{debug, error, info, warn};
 use purecrypto::rsa::BoxedRsaPrivateKey;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use rust_embed::RustEmbed;
-#[cfg(not(unix))]
-use std::future;
 use std::{
+    future,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, SystemTime},
@@ -100,17 +99,23 @@ async fn main() {
     let server_handle = handle.clone();
     tokio::spawn(async move {
         let ctrl_c = async {
-            signal::ctrl_c()
-                .await
-                .expect("failed to install Ctrl+C handler");
+            if let Err(error) = signal::ctrl_c().await {
+                error!("failed to install Ctrl+C handler: {error}");
+                future::pending::<()>().await;
+            }
         };
 
         #[cfg(unix)]
         let terminate = async {
-            signal::unix::signal(signal::unix::SignalKind::terminate())
-                .expect("failed to install signal handler")
-                .recv()
-                .await;
+            match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+                Ok(mut handler) => {
+                    handler.recv().await;
+                }
+                Err(error) => {
+                    error!("failed to install termination signal handler: {error}");
+                    future::pending::<()>().await;
+                }
+            }
         };
 
         #[cfg(not(unix))]
@@ -137,19 +142,22 @@ async fn main() {
             .expect("Failed to configure web server TLS");
         debug!("TLS Configured");
 
-        axum_server::bind_rustls(addr, tls_config)
+        let server = axum_server::bind_rustls(addr, tls_config);
+        debug!("Web Server Started");
+        server
             .handle(handle)
             .serve(app.into_make_service())
             .await
             .expect("Failed to start web server");
     } else {
-        axum_server::bind(addr)
+        let server = axum_server::bind(addr);
+        debug!("Web Server Started");
+        server
             .handle(handle)
             .serve(app.into_make_service())
             .await
             .expect("Failed to start web server");
     }
-    debug!("Web Server Started");
 }
 
 fn generate_code() -> String {
