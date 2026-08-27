@@ -85,3 +85,11 @@ ProductName = "Coconut Crab"
 OriginalFilename = "coconut_crab_client.exe"
 FileDescription = "Mary-Kate and Ashley"
 LegalCopyright = "jenkinsmichpa"
+
+[lints.clippy]
+correctness = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
