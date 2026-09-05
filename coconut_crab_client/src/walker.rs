@@ -1,5 +1,5 @@
 use flume::Sender;
-use log::{debug, error};
+use log::{debug, error, trace};
 use rand::{SeedableRng, rngs::SmallRng, seq::SliceRandom};
 use std::{
     ffi::OsStr,
@@ -10,53 +10,117 @@ use std::{
 };
 use zlob::walk::{WalkBuilder, WalkEntry, WalkFlags, WalkState};
 
-use crate::{config, status::STATUS_FILENAME};
-use coconut_crab_lib::file::get_lowercase_extension;
+use crate::{
+    config,
+    status::{ANALYSIS_FILENAME, STATUS_FILENAME},
+};
 
 const WALK_COORDINATOR_STACK_SIZE: usize = 8 << 20;
 
-pub fn walk_with_exts(
-    sender: Sender<Arc<PathBuf>>,
-    allow_exts: Option<Vec<String>>,
-    block_exts: Option<Vec<String>>,
-    threads: usize,
-) -> thread::JoinHandle<()> {
-    debug!("Starting walk thread with {threads} zlob workers");
+fn new_builder(starting_path: &Path, threads: usize) -> Option<WalkBuilder> {
+    let mut builder = match WalkBuilder::new(starting_path) {
+        Ok(builder) => {
+            debug!("Created WalkBuilder for: {}", starting_path.display());
+            builder
+        }
+        Err(error) => {
+            error!(
+                "Failed to create WalkBuilder for {}: {error}",
+                starting_path.display()
+            );
+            return None;
+        }
+    };
 
+    let mut flags = WalkFlags::empty();
+    if config::AVOID_HIDDEN {
+        flags |= WalkFlags::SKIP_HIDDEN;
+        debug!("Hidden files/dirs will be skipped");
+    }
+    debug!("Walk flags set: {flags:?}");
+    builder.options(flags);
+    builder.threads(threads);
+    Some(builder)
+}
+
+fn resolve_filters<'a>(
+    allow_exts: Option<&'a [String]>,
+    block_exts: Option<&'a [String]>,
+) -> (Option<&'a [String]>, Option<&'a [String]>) {
+    let allow = allow_exts.or(Some(config::ALLOWLIST_EXTENSIONS.as_slice()));
+    let block = block_exts.or(config::BLOCKLIST_EXTENSIONS.as_deref());
+    (allow, block)
+}
+
+fn file_should_include(
+    path: &Path,
+    allow_exts: Option<&[String]>,
+    block_exts: Option<&[String]>,
+) -> bool {
+    if is_blocked(path) {
+        return false;
+    }
+    file_filter(path, allow_exts, block_exts)
+}
+
+fn send_path(sender: &Sender<Arc<PathBuf>>, path: PathBuf) {
+    debug!(
+        "Sending path to crypto/analysis/canary thread: {}",
+        path.display()
+    );
+    if let Err(error) = sender.send(Arc::new(path)) {
+        error!("Failed to send path to crypto/analysis/canary thread: {error}");
+    }
+}
+
+fn with_each_builder(threads: usize, mut visit: impl FnMut(&Path, WalkBuilder)) {
+    for starting_path in config::ALLOWLIST_PATHS.iter() {
+        let Some(builder) = new_builder(starting_path, threads) else {
+            continue;
+        };
+        visit(starting_path, builder);
+    }
+}
+
+fn spawn_coordinator(
+    label: &'static str,
+    allow_exts: Option<&[String]>,
+    block_exts: Option<&[String]>,
+    body: impl FnOnce(Option<Vec<String>>, Option<Vec<String>>) + Send + 'static,
+) -> thread::JoinHandle<()> {
+    debug!("Starting {label} coordinator thread");
+    let allow_owned = allow_exts.map(<[String]>::to_vec);
+    let block_owned = block_exts.map(<[String]>::to_vec);
     thread::Builder::new()
         .stack_size(WALK_COORDINATOR_STACK_SIZE)
-        .spawn(move || {
-            let allow_exts = allow_exts
-                .as_deref()
-                .or(Some(config::ALLOWLIST_EXTENSIONS.as_slice()));
-            let block_exts = block_exts
-                .as_deref()
-                .or(config::BLOCKLIST_EXTENSIONS.as_deref());
+        .spawn(move || body(allow_owned, block_owned))
+        .expect("Failed to spawn walk coordinator thread")
+}
 
-            for starting_path in config::ALLOWLIST_PATHS.iter() {
-                let mut builder = match WalkBuilder::new(starting_path) {
-                    Ok(builder) => {
-                        debug!("Created WalkBuilder for: {}", starting_path.display());
-                        builder
-                    }
-                    Err(error) => {
-                        error!(
-                            "Failed to create WalkBuilder for {}: {error}",
-                            starting_path.display()
-                        );
-                        continue;
-                    }
-                };
+fn shuffle_and_send_path(sender: &Sender<Arc<PathBuf>>, mut paths: Vec<PathBuf>) {
+    let mut rng_cheap = SmallRng::from_rng(&mut rand::rng());
+    debug!("Created cheap random number generator");
+    paths.shuffle(&mut rng_cheap);
+    for path in paths {
+        send_path(sender, path);
+    }
+}
 
-                let mut flags = WalkFlags::empty();
-                if config::AVOID_HIDDEN {
-                    flags |= WalkFlags::SKIP_HIDDEN;
-                    debug!("Hidden files/dirs will be skipped");
-                }
-                debug!("Walk flags set: {flags:?}");
-                builder.options(flags);
-                builder.threads(threads);
+pub fn walk_with_exts(
+    sender: Sender<Arc<PathBuf>>,
+    allow_exts: Option<&[String]>,
+    block_exts: Option<&[String]>,
+    threads: usize,
+) -> thread::JoinHandle<()> {
+    spawn_coordinator(
+        "walk",
+        allow_exts,
+        block_exts,
+        move |allow_owned, block_owned| {
+            let (allow_exts, block_exts) =
+                resolve_filters(allow_owned.as_deref(), block_owned.as_deref());
 
+            with_each_builder(threads, |starting_path, builder| {
                 debug!(
                     "Starting zlob walk for: {} with {threads} worker threads",
                     starting_path.display()
@@ -78,53 +142,27 @@ pub fn walk_with_exts(
                 }) {
                     error!("Walk error for {}: {error}", starting_path.display());
                 }
-            }
-        })
-        .expect("Failed to spawn walk coordinator thread")
+            });
+        },
+    )
 }
 
 pub fn random_walk_with_exts(
     sender: Sender<Arc<PathBuf>>,
-    allow_exts: Option<Vec<String>>,
-    block_exts: Option<Vec<String>>,
+    allow_exts: Option<&[String]>,
+    block_exts: Option<&[String]>,
     threads: usize,
 ) -> thread::JoinHandle<()> {
-    debug!("Starting random walk thread with {threads} zlob workers");
+    spawn_coordinator(
+        "random walk",
+        allow_exts,
+        block_exts,
+        move |allow_owned, block_owned| {
+            let (allow_exts, block_exts) =
+                resolve_filters(allow_owned.as_deref(), block_owned.as_deref());
+            let mut found_paths: Vec<PathBuf> = Vec::new();
 
-    thread::Builder::new()
-        .stack_size(WALK_COORDINATOR_STACK_SIZE)
-        .spawn(move || {
-            let allow_exts = allow_exts
-                .as_deref()
-                .or(Some(config::ALLOWLIST_EXTENSIONS.as_slice()));
-            let block_exts = block_exts
-                .as_deref()
-                .or(config::BLOCKLIST_EXTENSIONS.as_deref());
-            let mut found_paths: Vec<PathBuf> = vec![];
-
-            for starting_path in config::ALLOWLIST_PATHS.iter() {
-                let mut builder = match WalkBuilder::new(starting_path) {
-                    Ok(builder) => {
-                        debug!("Created WalkBuilder for: {}", starting_path.display());
-                        builder
-                    }
-                    Err(error) => {
-                        error!(
-                            "Failed to create WalkBuilder for {}: {error}",
-                            starting_path.display()
-                        );
-                        continue;
-                    }
-                };
-
-                let mut flags = WalkFlags::empty();
-                if config::AVOID_HIDDEN {
-                    flags |= WalkFlags::SKIP_HIDDEN;
-                    debug!("Hidden files/dirs will be skipped");
-                }
-                builder.options(flags);
-                builder.threads(threads);
-
+            with_each_builder(threads, |starting_path, builder| {
                 debug!(
                     "Starting zlob collect for: {} with {threads} worker threads",
                     starting_path.display()
@@ -133,7 +171,7 @@ pub fn random_walk_with_exts(
                     Ok(results) => results,
                     Err(error) => {
                         error!("Walk error for {}: {error}", starting_path.display());
-                        continue;
+                        return;
                     }
                 };
 
@@ -144,40 +182,21 @@ pub fn random_walk_with_exts(
                 );
 
                 for entry in results.iter() {
-                    if is_blocked(entry.path()) {
-                        debug!("Blocklist contains entry: {}", entry.path().display());
+                    if !entry.is_file() {
                         continue;
                     }
-
-                    if entry.is_file() {
-                        let entry_path = entry.path().to_path_buf();
-
-                        if file_filter(&entry_path, allow_exts, block_exts) {
-                            debug!("Entry matched filter: {}", entry_path.display());
-                            found_paths.push(entry_path);
-                        } else {
-                            debug!("Entry did not match filter: {}", entry_path.display());
-                        }
+                    if file_should_include(entry.path(), allow_exts, block_exts) {
+                        debug!("Entry matched filter: {}", entry.path().display());
+                        found_paths.push(entry.path().to_path_buf());
+                    } else {
+                        debug!("Entry did not match filter: {}", entry.path().display());
                     }
                 }
-            }
+            });
 
-            let mut rng_cheap = SmallRng::from_rng(&mut rand::rng());
-            debug!("Created cheap random number generator");
-
-            found_paths.shuffle(&mut rng_cheap);
-
-            for path in found_paths {
-                debug!(
-                    "Sending path to crypto/analysis/canary thread: {}",
-                    path.display()
-                );
-                if let Err(error) = sender.send(Arc::new(path)) {
-                    error!("Failed to send path to crypto/analysis/canary thread: {error}");
-                }
-            }
-        })
-        .expect("Failed to spawn random walk coordinator thread")
+            shuffle_and_send_path(&sender, found_paths);
+        },
+    )
 }
 
 fn process_walk_entry(
@@ -186,24 +205,20 @@ fn process_walk_entry(
     allow_exts: Option<&[String]>,
     block_exts: Option<&[String]>,
 ) -> WalkState {
-    if entry.is_dir() && is_blocked(entry.path()) {
-        return WalkState::SkipDir;
+    if entry.is_dir() {
+        return if is_blocked(entry.path()) {
+            WalkState::SkipDir
+        } else {
+            WalkState::Continue
+        };
     }
 
     if entry.is_file() {
-        let entry_path = entry.path().to_path_buf();
-
-        if is_blocked(&entry_path) {
-            return WalkState::Continue;
-        }
-
-        if file_filter(&entry_path, allow_exts, block_exts) {
-            debug!("Entry matched filter: {}", entry_path.display());
-            if let Err(error) = sender.send(Arc::new(entry_path)) {
-                error!("Failed to send path to crypto/analysis/canary thread: {error}");
-            }
+        if file_should_include(entry.path(), allow_exts, block_exts) {
+            debug!("Entry matched filter: {}", entry.path().display());
+            send_path(sender, entry.path().to_path_buf());
         } else {
-            debug!("Entry did not match filter: {}", entry_path.display());
+            debug!("Entry did not match filter: {}", entry.path().display());
         }
     }
 
@@ -211,15 +226,23 @@ fn process_walk_entry(
 }
 
 fn is_blocked(entry_path: &Path) -> bool {
-    if let Some(blocklist_paths) = config::BLOCKLIST_PATHS.as_ref() {
-        for blocked in blocklist_paths {
-            if entry_path == blocked.as_path() || entry_path.starts_with(blocked) {
+    config::BLOCKLIST_PATHS.as_deref().is_some_and(|paths| {
+        paths.iter().any(|blocked| {
+            let hit = entry_path.starts_with(blocked);
+            if hit {
                 debug!("Blocklist contains entry: {}", entry_path.display());
-                return true;
             }
-        }
-    }
-    false
+            hit
+        })
+    })
+}
+
+fn extension_matches(list: &[String], file_path: &Path) -> bool {
+    let Some(ext) = file_path.extension().and_then(|e| e.to_str()) else {
+        return false;
+    };
+    list.iter()
+        .any(|allowed| allowed.as_str().eq_ignore_ascii_case(ext))
 }
 
 fn file_filter(
@@ -227,52 +250,47 @@ fn file_filter(
     allowlist_extensions: Option<&[String]>,
     blocklist_extensions: Option<&[String]>,
 ) -> bool {
-    let mut file_match = true;
-    let lowercase_extension = get_lowercase_extension(file_path);
-
     if let Some(allowlist_extensions) = allowlist_extensions {
-        debug!("Applying allowlist to file: {}", file_path.display());
-        if allowlist_extensions.contains(&lowercase_extension) {
-            debug!("Allowlist contains extension: {}", file_path.display());
-        } else {
-            debug!(
+        trace!("Applying allowlist to file: {}", file_path.display());
+        if !extension_matches(allowlist_extensions, file_path) {
+            trace!(
                 "Allowlist does not contain extension: {}",
                 file_path.display()
             );
-            file_match = false;
+            return false;
         }
+        trace!("Allowlist contains extension: {}", file_path.display());
     } else {
-        debug!("Not applying allowlist to file: {}", file_path.display());
+        trace!("Not applying allowlist to file: {}", file_path.display());
     }
 
     if let Some(blocklist_extensions) = blocklist_extensions {
-        debug!("Applying blocklist to file: {}", file_path.display());
-        if blocklist_extensions.contains(&lowercase_extension) {
-            debug!("Blocklist contains file extension: {}", file_path.display());
-            file_match = false;
-        } else {
-            debug!(
-                "Blocklist does not contain file extension: {}",
-                file_path.display()
-            );
+        trace!("Applying blocklist to file: {}", file_path.display());
+        if extension_matches(blocklist_extensions, file_path) {
+            trace!("Blocklist contains file extension: {}", file_path.display());
+            return false;
+        }
+        trace!(
+            "Blocklist does not contain file extension: {}",
+            file_path.display()
+        );
+    } else {
+        trace!("Not applying blocklist to file: {}", file_path.display());
+    }
+
+    if let Some(name) = file_path.file_name() {
+        trace!("Successfully got filename: {}", name.to_string_lossy());
+        if name == OsStr::new(STATUS_FILENAME.as_str())
+            || name == OsStr::new(ANALYSIS_FILENAME.as_str())
+        {
+            trace!("File is own output. Avoiding ouroboros.");
+            return false;
         }
     } else {
-        debug!("Not applying blocklist to file: {}", file_path.display());
+        error!("Failed to get filename: {}", file_path.display());
+        return false;
     }
 
-    match file_path.file_name() {
-        Some(name) => {
-            debug!("Successfully got filename: {}", name.to_string_lossy());
-            if name == OsStr::new(STATUS_FILENAME.as_str()) {
-                debug!("File is {}. Avoiding ouroboros.", *STATUS_FILENAME);
-                file_match = false;
-            }
-        }
-        None => {
-            error!("Failed to get filename: {}", file_path.display());
-        }
-    }
-
-    debug!("{} matches: {file_match}", file_path.display());
-    file_match
+    trace!("{} matches: true", file_path.display());
+    true
 }

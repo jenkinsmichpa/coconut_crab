@@ -10,7 +10,7 @@
 
 This is client (coconut_crab_client) / server (coconut_crab_server) application built in Rust to simulate a ransomware attack.
 
-**This software is indended for use in education only and should not be used for harm.**
+**This software is intended for use in education only and should not be used for harm.**
 
 The following additional applications are included:
 
@@ -82,6 +82,7 @@ As this is an application for education and not real-world use, there were sever
 - The client requests a public key from the server before it can begin (creating artifacts for students)
 - Files are encrypted with a single ChaCha20-Poly1305 AEAD operation per file rather than a streaming chunked format
   - This keeps the on-disk format simple for students to determine, but requires the entire file to be buffered in memory
+  - Files larger than MAX_ENCRYPT_FILE_BYTES are skipped with an error instead of risking memory exhaustion
 
 **I am not a software engineer and this was my first time with Rust. Beware of data loss!**
 
@@ -117,6 +118,7 @@ ANALYZE_PDF | bool | should client analyze pdf files for canaries
 RANDOM_ORDER | bool | should client randomize the order that files are encrypted
 WAIT_TIME | u32 | time to wait between file encryptions (set to 0 for no delay)
 JITTER_TIME | u32 | time variance applied to wait_time
+MAX_ENCRYPT_FILE_BYTES | u64 | maximum file size in bytes encrypted in memory (larger files are skipped)
 PRESHARED_SECRET | LazyLock\<String\> | code used to validate web requests (must match server)
 
 GUI text can be configured in `coconut_crab_client/ui/main.slint`

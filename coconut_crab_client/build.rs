@@ -1,6 +1,8 @@
 use std::env;
 
 fn main() {
+    println!("cargo:rerun-if-changed=ui/main.slint");
+    println!("cargo:rerun-if-changed=assets/img/favicon.ico");
     slint_build::compile("ui/main.slint").expect("Failed to get Slint UI file");
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {

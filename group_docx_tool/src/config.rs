@@ -12,4 +12,4 @@ pub const MIN_WORD_SIZE: usize = 4;
 pub const MAX_WORD_SIZE: usize = 8;
 
 /// Secret to validate word hash [required]
-pub static SECRET: &[u8; 64] = b"3X9csL9kemmWkJEKGV46NytNFh3w9QSTHcuazXfzfPuasvqeLXjyutQQ6DKTxqs9";
+pub const SECRET: &[u8; 64] = b"3X9csL9kemmWkJEKGV46NytNFh3w9QSTHcuazXfzfPuasvqeLXjyutQQ6DKTxqs9";

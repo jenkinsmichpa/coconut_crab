@@ -3,108 +3,79 @@
 use log::{debug, error, info, warn};
 use std::{
     env::current_exe,
-    ffi::OsStr,
     fs::{self, File},
-    io::{Error, Write},
+    io::{Error, Read, Write},
     path::{Path, PathBuf},
 };
 
-pub fn get_lowercase_extension(path: &Path) -> String {
-    let file_extension = path.extension().map_or_else(
-        || {
-            debug!("File has no extension: {}", path.display());
-            OsStr::new("")
-        },
-        |ext| {
-            debug!("File has extension: {}", ext.display());
-            ext
-        },
-    );
-    file_extension.to_string_lossy().to_lowercase()
+pub fn get_file_data(file_path: impl AsRef<Path>, max_size: u64) -> Result<Option<Vec<u8>>, Error> {
+    let file_path = file_path.as_ref();
+    let file = File::open(file_path).map_err(|error| {
+        error!("Failed to open file: {error}");
+        error
+    })?;
+    let mut limited = file.take(max_size + 1);
+    let cap = usize::try_from(max_size.min(8 * 1024 * 1024)).unwrap_or(usize::MAX);
+    let mut data = Vec::with_capacity(cap);
+    limited.read_to_end(&mut data).map_err(|error| {
+        error!("Error reading file: {error:?}");
+        error
+    })?;
+    if u64::try_from(data.len()).is_ok_and(|len| len > max_size) {
+        warn!(
+            "File size exceeds max read size ({max_size}): {}",
+            file_path.display()
+        );
+        return Ok(None);
+    }
+    debug!("Successfully read file: {}", file_path.display());
+    Ok(Some(data))
 }
 
-pub fn get_file_size(path: &PathBuf) -> Result<u64, Error> {
-    match fs::metadata(path) {
-        Ok(metadata) => {
-            debug!("Successfully extracted file metadata: {metadata:?}");
-            Ok(metadata.len())
-        }
-        Err(error) => {
-            error!("Cannot extract file metadata: {error:?}");
-            Err(error)
-        }
-    }
-}
-
-pub fn get_file_data(file_path: &PathBuf, max_size: u64) -> Result<Option<Vec<u8>>, Error> {
-    match get_file_size(file_path) {
-        Ok(size) => {
-            if size > max_size {
-                warn!("File size ({size}) exceeds max read size ({max_size})");
-                return Ok(None);
-            }
-        }
-        Err(error) => {
-            error!("Failed to get file size: {error}");
-            return Err(error);
-        }
-    }
-
-    match fs::read(file_path) {
-        Ok(data) => {
-            debug!("Successfully read file: {}", file_path.display());
-            Ok(Some(data))
-        }
-        Err(error) => {
-            error!("Error reading file: {error:?}");
-            Err(error)
-        }
-    }
-}
-
-pub fn get_exe_path_dir() -> PathBuf {
-    let exe_path = match current_exe() {
-        Ok(path) => {
-            debug!("Got EXE path: {}", path.display());
-            path
-        }
-        Err(error) => {
-            error!("Failed to get executable path: {error}");
-            PathBuf::new()
-        }
+pub fn get_exe_path_dir() -> Result<PathBuf, Error> {
+    let exe_path = current_exe().map_err(|error| {
+        error!("Failed to get executable path: {error}");
+        error
+    })?;
+    debug!("Got EXE path: {}", exe_path.display());
+    let Some(parent) = exe_path.parent() else {
+        error!("Failed to get executable parent path");
+        return Err(Error::other("Failed to get executable parent path"));
     };
-    let exe_path_dir = exe_path.parent().map_or_else(
-        || {
-            error!("Failed to get executable parent path");
-            Path::new("")
-        },
-        |parent| {
-            debug!("Got EXE parent path: {}", parent.display());
-            parent
-        },
-    );
-    exe_path_dir.to_path_buf()
+    debug!("Got EXE parent path: {}", parent.display());
+    Ok(parent.to_path_buf())
 }
 
-pub fn write_to_file(data: &[u8], file_path: &PathBuf) -> Result<(), Error> {
-    let mut file = match File::create(file_path) {
-        Ok(file) => {
-            debug!("Successfully opened file: {file:?}");
-            file
-        }
-        Err(error) => {
+pub fn write_to_file(data: &[u8], file_path: impl AsRef<Path>) -> Result<(), Error> {
+    let file_path = file_path.as_ref();
+    let mut tmp_path = file_path.as_os_str().to_os_string();
+    tmp_path.push(".tmp");
+    let tmp_path = PathBuf::from(tmp_path);
+    let result = (|| -> Result<(), Error> {
+        let mut file = File::create(&tmp_path).map_err(|error| {
             error!("Unable to open file: {error}");
-            return Err(error);
-        }
-    };
-    match file.write_all(data) {
-        Ok(()) => {
-            info!("Successfully wrote data to file: {}", file_path.display());
-            Ok(())
-        }
-        Err(error) => {
+            error
+        })?;
+        debug!("Successfully opened file: {}", tmp_path.display());
+        file.write_all(data).map_err(|error| {
             error!("Failed to write data to file: {error}");
-            Err(error)
-        }
+            error
+        })?;
+        file.sync_all().map_err(|error| {
+            error!("Failed to sync data to file: {error}");
+            error
+        })?;
+        drop(file);
+        fs::rename(&tmp_path, file_path).map_err(|error| {
+            error!("Failed to replace file: {error}");
+            error
+        })?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    } else {
+        info!("Successfully wrote data to file: {}", file_path.display());
     }
+    result
 }

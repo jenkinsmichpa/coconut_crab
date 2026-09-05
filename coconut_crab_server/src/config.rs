@@ -12,4 +12,4 @@ pub static PRESHARED_SECRET: &str =
     "gEFPsWMHEjdbBccgFKAFwdYwD98mH6cn7mmVwVgS8Vq4EUNocCwh3wLHrEVA7RzS";
 
 /// Code valid for any victim [required]
-pub static BYPASS_CODE: &str = "2NSd-NRF3-qkB3-v6qP";
+pub const BYPASS_CODE: &str = "2NSd-NRF3-qkB3-v6qP";

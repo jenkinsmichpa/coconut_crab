@@ -18,6 +18,7 @@ categories = ["simulation", "security"]
 
 [dependencies]
 coconut_crab_lib = { path = "../coconut_crab_lib" }
+serde = { workspace = true }
 axum = { version = "0.8.9", default-features = false, features = [
   "json",
   "tokio",
@@ -26,22 +27,14 @@ axum-embed = "0.1.0"
 axum-server = { version = "0.8.0", default-features = false, features = [
   "tls-rustls-no-provider",
 ] }
-env_logger = { version = "0.11.11", default-features = false, features = [
-  "auto-color",
-  "humantime",
-] }
-hex = "0.4.3"
-log = "0.4.33"
-rand = "0.10.2"
-purecrypto = { version = "0.7.0", default-features = false, features = [
-  "rsa",
-  "der",
-  "std",
-] }
-rust-embed = { version = "8.12.0", default-features = false, features = [
-  "compression",
-] }
+env_logger = { workspace = true }
+hex = { workspace = true }
+log = { workspace = true }
+rand = { workspace = true }
+purecrypto = { workspace = true, features = ["rsa", "der", "std"] }
+rust-embed = { workspace = true, features = ["compression"] }
 toasty = { version = "0.10.0", features = ["sqlite", "migration"] }
+toasty-driver-sqlite = "0.10.0"
 tokio = { version = "1.53.1", features = [
   "macros",
   "rt-multi-thread",
@@ -54,10 +47,5 @@ rustls = { version = "0.23.43", default-features = false, features = [
   "logging",
 ] }
 
-[lints.clippy]
-correctness = { level = "warn", priority = -1 }
-perf = { level = "warn", priority = -1 }
-complexity = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
-style = { level = "warn", priority = -1 }
+[lints]
+workspace = true

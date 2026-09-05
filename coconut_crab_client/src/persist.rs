@@ -1,96 +1,71 @@
 use auto_launch::{AutoLaunch, AutoLaunchBuilder};
-use log::{Level, debug, error, info, log_enabled};
+use log::{debug, error, info};
 use std::{env, io};
 
+const APP_NAME: &str = "Coconut Crab";
+
 fn get_autolaunch() -> Result<AutoLaunch, io::Error> {
-    let exe_path = match env::current_exe() {
-        Ok(path) => {
+    let exe_path = env::current_exe()
+        .map(|path| {
             debug!("Successfully got current exe path: {}", path.display());
             path.to_string_lossy().into_owned()
-        }
-        Err(error) => {
+        })
+        .map_err(|error| {
             error!("Failed to get current exe path: {error}");
-            return Err(error);
-        }
-    };
-    let app_name = "Coconut Crab";
-    let autolaunch = match AutoLaunchBuilder::new()
-        .set_app_name(app_name)
+            error
+        })?;
+    AutoLaunchBuilder::new()
+        .set_app_name(APP_NAME)
         .set_app_path(&exe_path)
-        .set_args(&[] as &[&str])
         .build()
-    {
-        Ok(autolaunch) => {
-            debug!("Successfully created AutoLaunch: {autolaunch:?}");
-            autolaunch
-        }
-        Err(error) => {
+        .map_err(|error| {
             error!("Failed to create AutoLaunch: {error}");
-            return Err(io::Error::other(error.to_string()));
-        }
-    };
-    Ok(autolaunch)
+            io::Error::other(error.to_string())
+        })
 }
 
-pub fn start_persist() {
-    let autolaunch = match get_autolaunch() {
-        Ok(autolaunch) => {
-            debug!("Successfully got AutoLaunch: {autolaunch:?}");
-            autolaunch
+fn check_enabled(
+    autolaunch: &AutoLaunch,
+    want_enabled: bool,
+    present: &str,
+    past: &str,
+) -> Result<(), io::Error> {
+    match autolaunch.is_enabled() {
+        Ok(enabled) if enabled == want_enabled => {
+            info!("AutoLaunch successfully {past}");
+            Ok(())
+        }
+        Ok(_) => {
+            error!("Unable to {present} AutoLaunch");
+            Err(io::Error::other(format!(
+                "AutoLaunch state unexpected after {present}"
+            )))
         }
         Err(error) => {
-            error!("Failed to get AutoLaunch: {error}");
-            return;
+            error!("Error getting AutoLaunch status: {error}");
+            Err(io::Error::other(error.to_string()))
         }
-    };
+    }
+}
 
-    if let Err(error) = autolaunch.enable() {
+pub fn start_persist() -> Result<(), io::Error> {
+    let autolaunch = get_autolaunch()?;
+    debug!("Successfully got AutoLaunch");
+
+    autolaunch.enable().map_err(|error| {
         error!("Error enabling AutoLaunch: {error}");
-    }
-
-    if log_enabled!(Level::Info) {
-        match autolaunch.is_enabled() {
-            Ok(status) => {
-                if status {
-                    info!("AutoLaunch successfully enabled. Status: {status}");
-                } else {
-                    error!("Unable to enable AutoLaunch. Status: {status}");
-                }
-            }
-            Err(error) => {
-                error!("Error getting AutoLaunch. status: {error}");
-            }
-        }
-    }
+        io::Error::other(error.to_string())
+    })?;
+    check_enabled(&autolaunch, true, "enable", "enabled")
 }
 
-pub fn stop_persist() {
-    let autolaunch = match get_autolaunch() {
-        Ok(autolaunch) => {
-            debug!("Successfully got AutoLaunch: {autolaunch:?}");
-            autolaunch
-        }
-        Err(error) => {
-            error!("Failed to get AutoLaunch: {error}");
-            return;
-        }
-    };
+pub fn stop_persist() -> Result<(), io::Error> {
+    let autolaunch = get_autolaunch()?;
+    debug!("Successfully got AutoLaunch");
 
-    if let Err(error) = autolaunch.disable() {
+    autolaunch.disable().map_err(|error| {
         error!("Error disabling AutoLaunch: {error}");
-    }
-    if log_enabled!(Level::Info) {
-        match autolaunch.is_enabled() {
-            Ok(status) => {
-                if status {
-                    error!("Unable to disable AutoLaunch. Status: {status}");
-                } else {
-                    info!("AutoLaunch successfully disabled. Status: {status}");
-                }
-            }
-            Err(error) => {
-                error!("Error getting AutoLaunch status: {error}");
-            }
-        }
-    }
+        io::Error::other(error.to_string())
+    })?;
+    check_enabled(&autolaunch, false, "disable", "disabled")
 }
