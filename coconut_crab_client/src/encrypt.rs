@@ -77,6 +77,7 @@ pub fn run_encryption_pipeline(cfg: EncryptionPipeline<'_>) -> Result<(), String
             None,
             None,
             cfg.thread_counts.walk,
+            Some(config::MAX_ENCRYPT_FILE_BYTES),
         ));
     } else {
         thread_handles.push(walk_with_exts(
@@ -84,6 +85,7 @@ pub fn run_encryption_pipeline(cfg: EncryptionPipeline<'_>) -> Result<(), String
             None,
             None,
             cfg.thread_counts.walk,
+            Some(config::MAX_ENCRYPT_FILE_BYTES),
         ));
     }
     drop(walk_tx);

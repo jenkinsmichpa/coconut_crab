@@ -28,7 +28,7 @@ pub fn encrypted_file_path(source: &Path, nonce: &[u8; 12], extension: &str) -> 
     let mut path = source.to_path_buf();
     let name = path
         .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
+        .map(|file_name| file_name.to_string_lossy().into_owned())
         .unwrap_or_default();
     path.set_file_name(format!("{name}.{nonce_ext}"));
     path
@@ -67,8 +67,7 @@ pub fn aead_encrypt_file(
             )));
         }
         let mut dest = File::create(destination_file_path)?;
-        let len = source_len.min(8 * 1024 * 1024);
-        let mut data = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
+        let mut data = Vec::with_capacity(usize::try_from(source_len).unwrap_or(0));
         source.read_to_end(&mut data)?;
         let tag = cipher.encrypt(full_nonce_bytes, aad, &mut data);
         dest.write_all(&data)?;
@@ -104,8 +103,7 @@ pub fn aead_decrypt_file(
             )));
         }
         let mut dest = File::create(&tmp_path)?;
-        let len = source_len.min(8 * 1024 * 1024);
-        let mut data = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
+        let mut data = Vec::with_capacity(usize::try_from(source_len).unwrap_or(0));
         source.read_to_end(&mut data)?;
         if data.len() < 16 {
             return Err(Error::other("Encrypted file shorter than Poly1305 tag"));
@@ -126,9 +124,9 @@ pub fn aead_decrypt_file(
             fs::rename(&tmp_path, destination_file_path)?;
             Ok(())
         }
-        Err(e) => {
+        Err(error) => {
             let _ = fs::remove_file(&tmp_path);
-            Err(e)
+            Err(error)
         }
     }
 }
@@ -178,5 +176,5 @@ pub fn encrypt_sym_key(
     let mut rng = OsRng;
     asym_pub_key
         .encrypt_pkcs1v15(sym_key, &mut rng)
-        .map_err(|e| format!("Failed to encrypt symmetric key: {e}"))
+        .map_err(|error| format!("Failed to encrypt symmetric key: {error}"))
 }

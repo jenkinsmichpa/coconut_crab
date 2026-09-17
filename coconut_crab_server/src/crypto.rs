@@ -16,11 +16,11 @@ pub fn generate_code() -> String {
             .map(char::from)
             .collect();
         let mut code = String::with_capacity(CODE_LEN);
-        for (i, c) in raw.chars().enumerate() {
-            if i > 0 && i % 4 == 0 {
+        for (index, character) in raw.chars().enumerate() {
+            if index > 0 && index % 4 == 0 {
                 code.push('-');
             }
-            code.push(c);
+            code.push(character);
         }
         if code != RECOVERY_REQUEST_CODE {
             break code;

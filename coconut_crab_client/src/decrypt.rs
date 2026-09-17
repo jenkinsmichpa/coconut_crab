@@ -119,6 +119,7 @@ fn decrypt_files(
         Some(exts.as_slice()),
         None,
         walk_threads,
+        Some(config::MAX_ENCRYPT_FILE_BYTES.saturating_add(16)),
     ));
     drop(dec_walk_tx);
 

@@ -6,6 +6,9 @@ use coconut_crab_lib::file::{get_exe_path_dir, write_to_file};
 
 const ICON_FILENAME: &str = "favicon.png";
 
+const MAX_DECODED_IMAGE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION: u32 = 32_768;
+
 use rust_embed::RustEmbed;
 #[derive(RustEmbed)]
 #[folder = "assets/img"]
@@ -13,11 +16,17 @@ use rust_embed::RustEmbed;
 struct AssetImg;
 
 pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, image::ImageError> {
-    let reader = ImageReader::new(Cursor::new(bytes));
+    let mut reader = ImageReader::new(Cursor::new(bytes));
+    let mut limits = image::Limits::no_limits();
+    limits.max_alloc = Some(MAX_DECODED_IMAGE_BYTES);
+    limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
+    limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
+    reader.limits(limits);
+
     let reader = match reader.with_guessed_format() {
         Ok(reader) => reader,
         Err(error) => {
-            error!("Failed to guess image format: {error}");
+            debug!("Failed to guess image format: {error}");
             return Err(image::ImageError::IoError(error));
         }
     };
@@ -27,7 +36,7 @@ pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, image::ImageError> {
             Ok(image)
         }
         Err(error) => {
-            error!("Failed to decode image: {error}");
+            debug!("Failed to decode image: {error}");
             Err(error)
         }
     }

@@ -30,7 +30,7 @@ hostname = "0.4.2"
 litcrypt2 = "0.1.3"
 log = { workspace = true }
 rust-embed = { workspace = true, features = ["include-exclude"] }
-slint = { version = "1.17.1", default-features = false, features = [
+slint = { version = "1.18.0", default-features = false, features = [
   "std",
   "backend-winit",
   "renderer-software",
@@ -61,11 +61,11 @@ zip = { version = "8.6.0", default-features = false, features = [
   "deflate-flate2-zlib-rs",
 ] }
 wallpaper = "3.2.0"
-zlob = "1.6.3"
+zlob = "1.6.5"
 [build-dependencies]
-embed-manifest = "1.5.0"
+embed-manifest = "1.5.1"
 winresource = "0.1.31"
-slint-build = "1.17.1"
+slint-build = "1.18.0"
 
 [package.metadata.winresource]
 ProductName = "Coconut Crab"

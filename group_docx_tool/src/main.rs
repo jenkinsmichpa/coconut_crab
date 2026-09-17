@@ -48,14 +48,14 @@ fn fetch_wordlist() -> Result<Vec<String>, String> {
     let content = agent
         .get(config::WORDLIST_URL)
         .call()
-        .map_err(|e| format!("Failed to download wordlist: {e}"))?
+        .map_err(|error| format!("Failed to download wordlist: {error}"))?
         .body_mut()
         .read_to_string()
-        .map_err(|e| format!("Failed to parse wordlist to string: {e}"))?;
+        .map_err(|error| format!("Failed to parse wordlist to string: {error}"))?;
     let words: Vec<String> = content
         .lines()
         .map(str::trim)
-        .filter(|x| x.len() >= config::MIN_WORD_SIZE && x.len() <= config::MAX_WORD_SIZE)
+        .filter(|word| word.len() >= config::MIN_WORD_SIZE && word.len() <= config::MAX_WORD_SIZE)
         .map(str::to_string)
         .collect();
     if words.len() < KEY_WORD_COUNT {
@@ -72,11 +72,11 @@ fn group_hash(group: u8) -> String {
 }
 
 fn docx_text(file_name: &str) -> Result<String, String> {
-    let docx =
-        DocxFile::from_file(file_name).map_err(|e| format!("Failed to get DOCX file: {e}"))?;
+    let docx = DocxFile::from_file(file_name)
+        .map_err(|error| format!("Failed to get DOCX file: {error}"))?;
     docx.parse()
         .map(|content| content.document.body.text())
-        .map_err(|e| format!("Failed to parse DOCX body: {e}"))
+        .map_err(|error| format!("Failed to parse DOCX body: {error}"))
 }
 
 fn verify_docx(file_name: &str, hash: &str) -> Result<(), String> {
@@ -102,7 +102,7 @@ fn verify_docx(file_name: &str, hash: &str) -> Result<(), String> {
 
     let mut word_hash = String::with_capacity(hash.len());
     for hash_word in hash_words {
-        let Some(index) = random_words.iter().position(|x| x == hash_word) else {
+        let Some(index) = random_words.iter().position(|word| word == hash_word) else {
             println!(
                 "❌ File {file_name} does not match {hash} (Unable to decode word: {hash_word})"
             );
@@ -149,5 +149,5 @@ fn create_docx(
         .push(Paragraph::default().push_text(file_content));
     docx.write_file(file_name)
         .map(|_| ())
-        .map_err(|e| format!("Failed to write to file: {e}"))
+        .map_err(|error| format!("Failed to write to file: {error}"))
 }

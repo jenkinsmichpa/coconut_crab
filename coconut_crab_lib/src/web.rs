@@ -186,7 +186,7 @@ pub mod validate {
         let len = key.len();
         (128..=1024).contains(&len)
             && len.is_multiple_of(2)
-            && key.bytes().all(|b| b.is_ascii_hexdigit())
+            && key.bytes().all(|byte| byte.is_ascii_hexdigit())
     }
 
     #[must_use]

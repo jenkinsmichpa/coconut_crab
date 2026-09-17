@@ -12,7 +12,7 @@ use std::{
 
 use crate::client::recv_path;
 
-const SHRED_BUFFER_SIZE: usize = 64 * 1024;
+const SHRED_BUFFER_SIZE: usize = 1024 * 1024;
 
 pub fn shred(receiver: Receiver<Arc<PathBuf>>) -> thread::JoinHandle<()> {
     debug!("Starting shredder thread");

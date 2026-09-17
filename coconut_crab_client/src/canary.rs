@@ -1,6 +1,6 @@
 use flume::{Receiver, Sender};
 use log::{debug, error, info};
-use regex::Regex;
+use regex::bytes::{Regex, RegexSet};
 use std::{
     io::{Cursor, Read},
     path::{Path, PathBuf},
@@ -14,9 +14,18 @@ use coconut_crab_lib::file::get_file_data;
 
 static INTERESTING_STRING_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[A-Za-z0-9:./-]{6,}").expect("Invalid Regex"));
-static LOOSE_URL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"https?://(?:[^.]+\.+)*([^.]+\.[^./]+)").expect("Invalid Regex"));
-static SUSPICIOUS_KEYWORDS: LazyLock<[String; 9]> = LazyLock::new(|| {
+static LOOSE_URL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i-u)https?://(?:[^.]+\.+)*([^.]+\.[^./]+)").expect("Invalid Regex")
+});
+static SUSPICIOUS_KEYWORD_SET: LazyLock<RegexSet> = LazyLock::new(|| {
+    RegexSet::new(
+        SUSPICIOUS_KEYWORDS
+            .iter()
+            .map(|keyword| format!("(?i-u){}", regex::escape(keyword))),
+    )
+    .expect("Invalid RegexSet")
+});
+pub static SUSPICIOUS_KEYWORDS: LazyLock<[String; 9]> = LazyLock::new(|| {
     [
         lc!("canary"),
         lc!("canaries"),
@@ -73,22 +82,24 @@ pub fn filter_canary(
                 continue;
             }
 
-            let ext = file_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or_default();
-            let is_pdf = ext.eq_ignore_ascii_case("pdf");
-            let is_office_zip = OFFICE_ZIP_EXTENSIONS
-                .iter()
-                .any(|allowed| ext.eq_ignore_ascii_case(allowed));
-            let is_image = IMAGE_EXTENSIONS
-                .iter()
-                .any(|allowed| ext.eq_ignore_ascii_case(allowed));
-            if config::ANALYZE_PDF && is_pdf {
+            let extension = file_path.extension().and_then(|ext| ext.to_str());
+            if config::ANALYZE_PDF && extension.is_some_and(|ext| ext.eq_ignore_ascii_case("pdf")) {
                 filter_pdf(&sender, &file_path);
-            } else if config::ANALYZE_OFFICE_ZIP && is_office_zip {
+            } else if config::ANALYZE_OFFICE_ZIP
+                && extension.is_some_and(|ext| {
+                    OFFICE_ZIP_EXTENSIONS
+                        .iter()
+                        .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+                })
+            {
                 filter_office_zip(&sender, &file_path);
-            } else if config::AVOID_BROKEN_IMAGES && is_image {
+            } else if config::AVOID_BROKEN_IMAGES
+                && extension.is_some_and(|ext| {
+                    IMAGE_EXTENSIONS
+                        .iter()
+                        .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+                })
+            {
                 filter_broken_image(&sender, &file_path);
             } else {
                 forward(&sender, &file_path, "no analysis applicable");
@@ -193,23 +204,21 @@ fn filter_broken_image(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) 
 }
 
 fn analyze_file_data(file_data: &[u8], avoid_keywords: bool, avoid_urls: bool) -> bool {
-    let lowered = String::from_utf8_lossy(file_data).to_ascii_lowercase();
-    INTERESTING_STRING_REGEX.find_iter(&lowered).any(|m| {
-        let interesting_string = m.as_str();
-        (avoid_keywords && contains_suspicious_keyword_lowered(interesting_string))
-            || (avoid_urls && analyze_urls(interesting_string))
-    })
-}
+    if avoid_keywords && SUSPICIOUS_KEYWORD_SET.is_match(file_data) {
+        return true;
+    }
 
-fn contains_suspicious_keyword_lowered(lowered: &str) -> bool {
-    SUSPICIOUS_KEYWORDS
-        .iter()
-        .any(|keyword| lowered.contains(keyword.as_str()))
+    if avoid_urls {
+        INTERESTING_STRING_REGEX
+            .find_iter(file_data)
+            .any(|token| analyze_urls(token.as_bytes()))
+    } else {
+        false
+    }
 }
 
 fn analyze_keywords(string: &str) -> bool {
-    let lowered = string.to_ascii_lowercase();
-    if contains_suspicious_keyword_lowered(&lowered) {
+    if SUSPICIOUS_KEYWORD_SET.is_match(string.as_bytes()) {
         info!("String flagged by analysis due to keyword");
         return true;
     }
@@ -217,13 +226,17 @@ fn analyze_keywords(string: &str) -> bool {
     false
 }
 
-fn analyze_urls(string: &str) -> bool {
-    for (_url, [domain]) in LOOSE_URL_REGEX
-        .captures_iter(string)
-        .map(|regex_capture| regex_capture.extract())
-    {
+fn analyze_urls(string: &[u8]) -> bool {
+    for capture in LOOSE_URL_REGEX.captures_iter(string) {
+        let Some(domain) = capture.get(1) else {
+            continue;
+        };
+        let domain = domain.as_bytes();
         if analyze_domain(domain) {
-            info!("URL flagged by analysis due to domain: {domain}");
+            info!(
+                "URL flagged by analysis due to domain: {}",
+                String::from_utf8_lossy(domain)
+            );
             return true;
         }
     }
@@ -231,13 +244,23 @@ fn analyze_urls(string: &str) -> bool {
     false
 }
 
-fn analyze_domain(domain: &str) -> bool {
-    if !OFFICE_FILE_DOMAINS.contains(&domain) {
-        debug!("Domain not a known office document domain: {domain}");
-        return true;
+fn analyze_domain(domain: &[u8]) -> bool {
+    let known = OFFICE_FILE_DOMAINS
+        .iter()
+        .any(|candidate| candidate.as_bytes().eq_ignore_ascii_case(domain));
+    if known {
+        debug!(
+            "Domain is a known office document domain: {}",
+            String::from_utf8_lossy(domain)
+        );
+        false
+    } else {
+        debug!(
+            "Domain not a known office document domain: {}",
+            String::from_utf8_lossy(domain)
+        );
+        true
     }
-    debug!("Domain is a known office document domain: {domain}");
-    false
 }
 
 fn analyze_zip_bytes(

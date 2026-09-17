@@ -64,19 +64,19 @@ pub fn export_status_csv(path: &Path, status: &Status) -> Result<(), String> {
     let temp_file_path = path.join(format!("{}.tmp", *STATUS_FILENAME));
 
     let file = File::create(&temp_file_path)
-        .map_err(|e| format!("Error accessing filesystem to write status CSV: {e}"))?;
+        .map_err(|error| format!("Error accessing filesystem to write status CSV: {error}"))?;
     let mut writer = WriterBuilder::new().has_headers(true).from_writer(file);
     writer
         .serialize(status)
-        .map_err(|e| format!("Failed to serialize status: {e}"))?;
+        .map_err(|error| format!("Failed to serialize status: {error}"))?;
     let file = writer
         .into_inner()
-        .map_err(|e| format!("Failed to flush status to file: {e}"))?;
+        .map_err(|error| format!("Failed to flush status to file: {error}"))?;
     file.sync_all()
-        .map_err(|e| format!("Failed to sync status to file: {e}"))?;
+        .map_err(|error| format!("Failed to sync status to file: {error}"))?;
     drop(file);
     fs::rename(&temp_file_path, &status_file_path)
-        .map_err(|e| format!("Failed to replace status CSV: {e}"))?;
+        .map_err(|error| format!("Failed to replace status CSV: {error}"))?;
     Ok(())
 }
 
@@ -100,9 +100,9 @@ fn sanitize_hostname(raw: &str) -> Option<String> {
     let cleaned: String = raw
         .chars()
         .take(32)
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
-                c
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '.' || character == '-' {
+                character
             } else {
                 '-'
             }
