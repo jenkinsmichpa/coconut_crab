@@ -1,20 +1,13 @@
 [package]
 name = "coconut_crab_lib"
-version = "0.1.0"
-authors = ["Michael Jenkins <me@jenkinsmichpa.com>"]
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "Library for coconut_crab packages"
-license = "MIT"
-repository = "https://github.com/jenkinsmichpa/coconut_crab"
-readme = "../README.md"
-keywords = [
-  "ransomware",
-  "simulation",
-  "incident-response",
-  "education",
-  "security",
-]
-categories = ["simulation", "security"]
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 serde = { workspace = true }
@@ -24,7 +17,7 @@ rust-embed = { workspace = true, features = ["include-exclude"] }
 ureq = { workspace = true, features = ["json", "rustls"] }
 hex = { workspace = true }
 purecrypto = { workspace = true, features = ["hash", "std"] }
-litcrypt2 = "0.1.3"
+litcrypt2 = { workspace = true }
 
 [lints]
 workspace = true
