@@ -1,13 +1,10 @@
 {
+  "line_ending": "enforce_lf",
   "lsp": {
     "rust-analyzer": {
       "initialization_options": {
-        "cargo": {
-          "buildScripts": {
-            "enable": true,
-          },
-        },
-      },
-    },
-  },
+        "check": { "command": "clippy" }
+      }
+    }
+  }
 }
