@@ -1186,7 +1186,7 @@ dependencies = [
  "rustls",
  "serde",
  "toasty",
- "toasty-driver-sqlite",
+ "toasty-driver-sqlite 0.10.0",
  "tokio",
 ]
 
@@ -6606,9 +6606,9 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "toasty"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c526dee282a42d5a2e61b189b8767181586a74a3d6494ef9076fc8d8a1daa7b9"
+checksum = "82c0ad66cbf23d9aeff0d85404e3799788dcea052d835997ed7e85bb3773725c"
 dependencies = [
  "async-trait",
  "bit-set 0.11.1",
@@ -6619,9 +6619,9 @@ dependencies = [
  "indexmap",
  "inventory",
  "serde",
- "toasty-core",
+ "toasty-core 0.11.0",
  "toasty-driver-mysql",
- "toasty-driver-sqlite",
+ "toasty-driver-sqlite 0.11.0",
  "toasty-macros",
  "tokio",
  "tokio-stream",
@@ -6645,6 +6645,25 @@ dependencies = [
  "heck",
  "indexmap",
  "percent-encoding",
+ "tokio-stream",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "toasty-core"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06ce722358481c0ad55b7b5edaaf9d0669ee5de6e9c737a73ca4c27621003732"
+dependencies = [
+ "async-trait",
+ "bit-set 0.11.1",
+ "fluent-uri",
+ "form_urlencoded",
+ "hashbrown 0.17.1",
+ "heck",
+ "indexmap",
+ "percent-encoding",
  "serde",
  "tokio-stream",
  "toml",
@@ -6654,16 +6673,16 @@ dependencies = [
 
 [[package]]
 name = "toasty-driver-mysql"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a7a281dccebd99defe5e84ab56e8871cf22296ac3bcca8d333e427697c8b7ea"
+checksum = "dfa5622479dff74a1db2178c8475e014f32ab434ffb06c8cb69142b0abebd876"
 dependencies = [
  "async-trait",
  "sqlx-core",
  "sqlx-mysql",
  "time",
- "toasty-core",
- "toasty-sql",
+ "toasty-core 0.11.0",
+ "toasty-sql 0.11.0",
  "tokio",
  "tracing",
  "uuid",
@@ -6678,25 +6697,40 @@ dependencies = [
  "async-trait",
  "rusqlite",
  "serde",
- "toasty-core",
- "toasty-sql",
+ "toasty-core 0.10.0",
+ "toasty-sql 0.10.0",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "toasty-driver-sqlite"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffaebb64e79526666cb2628a7de5979da5ef282bb3f36a7e3b6a5acc55936794"
+dependencies = [
+ "async-trait",
+ "rusqlite",
+ "serde",
+ "toasty-core 0.11.0",
+ "toasty-sql 0.11.0",
  "tracing",
  "uuid",
 ]
 
 [[package]]
 name = "toasty-macros"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a46f85a2a258f59e32789b2de7a5b171e4c68835311dcec9ca71ef6e7901714d"
+checksum = "6f5b5a87266b1cccdd184244733b26fdac9ed3997446c5aca88c2c71f5b03f61"
 dependencies = [
- "hashbrown 0.17.1",
  "heck",
+ "indexmap",
  "pluralizer",
  "proc-macro2",
  "quote",
  "syn 3.0.6",
- "toasty-core",
+ "toasty-core 0.11.0",
 ]
 
 [[package]]
@@ -6707,7 +6741,18 @@ checksum = "7b44b08035efcf8e087c6377ae18942066b1f8e976cd3821571e45463ecf3d6f"
 dependencies = [
  "serde",
  "serde_json",
- "toasty-core",
+ "toasty-core 0.10.0",
+]
+
+[[package]]
+name = "toasty-sql"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29b50cee2799bc54257ba202a9497f07b59df7e446b6df27fbf801cffe4b1b8a"
+dependencies = [
+ "serde",
+ "serde_json",
+ "toasty-core 0.11.0",
 ]
 
 [[package]]
