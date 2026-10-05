@@ -56,7 +56,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 slint = { version = "1.18.1", default-features = false }
 slint-build = "1.18.1"
 toasty = "0.10.0"
-toasty-driver-sqlite = "0.10.0"
+toasty-driver-sqlite = "0.11.0"
 tokio = "1.53.1"
 ureq = { version = "3.4.2", default-features = false }
 wallpaper = "3.2.0"
