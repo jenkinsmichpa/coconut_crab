@@ -1222,6 +1222,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "compcol"
+version = "0.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6f29da98742f258743e8bb44b09f0cc1cbca2591e709b1bb85ccd6e9111f431"
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5070,9 +5076,12 @@ checksum = "1d8f70e07b9c3962945a74e59ca1c511bba65b6419468acc217c457d93f3c740"
 
 [[package]]
 name = "purecrypto"
-version = "0.9.1"
+version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7cbd320dad3dbf87ec1ead3b83f1463d9d584e38243f344019b426b9f82ebb3"
+checksum = "d10f61755e4fcf225ab00ba50e77e30ac376f1ee1617a51720d7c54a3a37b1c2"
+dependencies = [
+ "compcol",
+]
 
 [[package]]
 name = "pxfm"
