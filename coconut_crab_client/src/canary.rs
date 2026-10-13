@@ -317,21 +317,21 @@ fn analyze_zip_bytes(
             debug!(
                 "Successfully read {} bytes from zipped file: {}",
                 zipped_file_data.len(),
-                entry.name()
+                String::from_utf8_lossy(entry.name_raw())
             );
 
             if u64::try_from(zipped_file_data.len()).is_ok_and(|len| len > zipped_file_max_size) {
                 debug!(
                     "Entry decompressed beyond max size ({}), skipping: {}",
                     zipped_file_data.len(),
-                    entry.name()
+                    String::from_utf8_lossy(entry.name_raw())
                 );
                 continue;
             }
             total_analyzed += zipped_file_data.len() as u64;
 
             if analyze_file_data(&zipped_file_data, avoid_keywords, avoid_urls) {
-                info!("Zipped file flagged by analysis: {}", entry.name());
+                info!("Zipped file flagged by analysis: {}", String::from_utf8_lossy(entry.name_raw()));
                 return Ok(true);
             }
         } else {

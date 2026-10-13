@@ -50,7 +50,7 @@ log = "0.4.34"
 purecrypto = { version = "0.9.9", default-features = false }
 rand = "0.10.3"
 regex = { version = "1.13.1", default-features = false, features = ["std", "perf"] }
-rust-embed = { version = "8.12.0", default-features = false }
+rust-embed = { version = "8.13.0", default-features = false }
 rustls = { version = "0.23.45", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 slint = { version = "1.18.1", default-features = false }
@@ -60,9 +60,9 @@ toasty-driver-sqlite = "0.11.0"
 tokio = "1.53.2"
 ureq = { version = "3.4.2", default-features = false }
 wallpaper = "3.2.0"
-winresource = "0.1.31"
-zeroize = "1.9.0"
-zip = { version = "8.6.0", default-features = false }
+winresource = "0.1.34"
+zeroize = "1.9.1"
+zip = { version = "9.0.3", default-features = false }
 zlob = "1.6.5"
 
 [profile.release]
