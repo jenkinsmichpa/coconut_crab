@@ -205,4 +205,4 @@ This project was developed by [Michael Jenkins](https://jenkinsmichpa.com) with 
 
 # License
 
-This project is licensed with the MIT License.
+This project is licensed with the modified MIT License provided.
