@@ -62,7 +62,7 @@ ureq = { version = "3.4.2", default-features = false }
 wallpaper = "3.2.0"
 winresource = "0.1.31"
 zeroize = "1.9.0"
-zip = { version = "8.6.0", default-features = false }
+zip = { version = "9.0.1", default-features = false }
 zlob = "1.6.5"
 
 [profile.release]
