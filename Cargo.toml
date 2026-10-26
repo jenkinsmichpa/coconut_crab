@@ -47,7 +47,7 @@ hostname = "0.4.2"
 image = { version = "0.25.10", default-features = false }
 litcrypt2 = "0.1.3"
 log = "0.4.34"
-purecrypto = { version = "0.9.9", default-features = false }
+purecrypto = { version = "0.10.2", default-features = false }
 rand = "0.10.3"
 regex = { version = "1.13.1", default-features = false, features = ["std", "perf"] }
 rust-embed = { version = "8.13.0", default-features = false }
