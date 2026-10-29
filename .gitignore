@@ -1,4 +1,15 @@
+# dependencies
+.direnv/
+
+# output
 /target
 */target
+
+# IDE / OS
 .DS_Store
-.direnv/
+.idea/
+.vscode/
+.pi-lens/
+
+# development scratch area
+/dev
