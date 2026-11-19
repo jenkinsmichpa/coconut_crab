@@ -1,10 +1,12 @@
-use flume::Receiver;
-use log::{debug, error, warn};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
     thread::available_parallelism,
 };
+
+use anyhow::Context;
+use flume::Receiver;
+use tracing::{debug, error, warn};
 
 use crate::{
     canary::canary_active,
@@ -17,30 +19,22 @@ pub fn initialize_client(
     exe_path_dir: &Path,
     conn: &ServerConn,
     preshared_secret: &str,
-) -> Result<Status, String> {
-    let existing = import_status_csv(exe_path_dir).map_err(|error| {
-        error!("Corrupt status CSV, cannot continue: {error}");
-        error
-    })?;
+) -> anyhow::Result<Status> {
+    let existing =
+        import_status_csv(exe_path_dir).context("failed to import existing status CSV")?;
     if let Some(csv) = existing {
         debug!("Successfully imported status");
         return Ok(csv);
     }
     warn!("Existing status not imported");
     let new_status = create_status();
-    register(conn, &new_status, preshared_secret).map_err(|error| {
-        error!("Failed to register with server - cannot continue: {error}");
-        error
-    })?;
-    export_status_csv(exe_path_dir, &new_status).map_err(|error| {
-        error!("Failed to export status - cannot continue: {error}");
-        error
-    })?;
+    register(conn, &new_status, preshared_secret).context("failed to register with server")?;
+    export_status_csv(exe_path_dir, &new_status).context("failed to export status CSV")?;
     debug!("Created new status");
     Ok(new_status)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ThreadCounts {
     pub walk: usize,
     pub shred: usize,
@@ -49,14 +43,14 @@ pub struct ThreadCounts {
     pub canary: usize,
 }
 
-pub fn get_thread_counts() -> ThreadCounts {
+pub fn thread_counts() -> ThreadCounts {
     let thread_count = match available_parallelism() {
         Ok(suggested) => {
-            debug!("Successfully got suggested number of threads: {suggested}");
+            debug!(suggested, "Successfully got suggested number of threads");
             suggested.get()
         }
         Err(error) => {
-            error!("Failed to get suggested number of threads: {error}");
+            error!(error = ?error, "Failed to get suggested number of threads");
             1
         }
     };
@@ -87,7 +81,8 @@ pub fn get_thread_counts() -> ThreadCounts {
     let decrypt_count = thread_count.saturating_sub(walk_count).max(1);
 
     debug!(
-        "Using {walk_count} walk, {canary_count} canary, {encrypt_count} encrypt, {shred_count} shred, {decrypt_count} decrypt"
+        walk_count,
+        canary_count, encrypt_count, shred_count, decrypt_count, "Using worker thread counts"
     );
 
     ThreadCounts {
@@ -106,11 +101,11 @@ pub fn channel_capacity(consumers: usize) -> usize {
 pub fn recv_path(receiver: &Receiver<Arc<PathBuf>>) -> Option<Arc<PathBuf>> {
     match receiver.recv() {
         Ok(path) => {
-            debug!("Received file path over channel: {path:?}");
+            debug!(path = %path.display(), "Received file path over channel");
             Some(path)
         }
         Err(error) => {
-            debug!("Channel closed, worker exiting: {error}");
+            debug!(error = ?error, "Channel closed, worker exiting");
             None
         }
     }

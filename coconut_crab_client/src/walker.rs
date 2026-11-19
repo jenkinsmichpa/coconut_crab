@@ -1,17 +1,20 @@
-use flume::Sender;
-use log::{debug, error, trace};
-use rand::{SeedableRng, rngs::SmallRng, seq::SliceRandom};
 use std::{
-    collections::HashSet,
     ffi::OsStr,
+    io,
     panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
+    str::from_utf8,
     sync::{
-        Arc,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicUsize, Ordering},
     },
-    thread,
+    thread::{self, JoinHandle},
 };
+
+use ahash::AHashSet;
+use flume::Sender;
+use rand::{SeedableRng, rngs::SmallRng, seq::SliceRandom};
+use tracing::{debug, error, trace};
 use zlob::{
     ZlobFlags,
     walk::{WalkBuilder, WalkEntry, WalkFlags, WalkMetadata, WalkState},
@@ -97,7 +100,18 @@ const fn oversize(size: Option<u64>, max_file_bytes: Option<u64>) -> bool {
 }
 
 fn native_ignore_rules(root: &Path, block_exts: Option<&[String]>) -> Vec<String> {
-    let mut rules = Vec::new();
+    let keyword_count = if config::AVOID_KEYWORDS && canary_active() {
+        SUSPICIOUS_KEYWORDS.len()
+    } else {
+        0
+    };
+    let mut rules = Vec::with_capacity(
+        2 + config::BLOCKLIST_PATHS
+            .as_deref()
+            .map_or_default(<[PathBuf]>::len)
+            + block_exts.map_or_default(<[String]>::len)
+            + keyword_count,
+    );
     if let Some(blocked_roots) = config::BLOCKLIST_PATHS.as_deref() {
         for blocked in blocked_roots {
             let Ok(rel) = blocked.strip_prefix(root) else {
@@ -127,9 +141,10 @@ fn native_ignore_rules(root: &Path, block_exts: Option<&[String]>) -> Vec<String
             if ext.is_empty() || ext.contains(['/', '\0']) {
                 continue;
             }
-            match fold_case_ignore(ext) {
-                Some(folded) => rules.push(format!("*.{folded}")),
-                None => debug!("Extension {ext:?} cannot be expressed natively, skipping"),
+            if let Some(folded) = fold_case_ignore(ext) {
+                rules.push(format!("*.{folded}"));
+            } else {
+                debug!(?ext, "Extension cannot be expressed natively, skipping");
             }
         }
     }
@@ -138,7 +153,7 @@ fn native_ignore_rules(root: &Path, block_exts: Option<&[String]>) -> Vec<String
             if let Some(pattern) = keyword_ignore_pattern(keyword) {
                 rules.push(pattern);
             } else {
-                debug!("Keyword {keyword:?} cannot be expressed natively, skipping");
+                debug!(?keyword, "Keyword cannot be expressed natively, skipping");
             }
         }
     }
@@ -177,22 +192,20 @@ fn configure_builder(
             .iter()
             .any(|blocked| starting_path.starts_with(blocked))
     }) {
-        debug!(
-            "Walk root {} is blocklisted, skipping",
-            starting_path.display()
-        );
+        debug!(path = %starting_path.display(), "Walk root is blocklisted, skipping");
         return None;
     }
 
     let mut builder = match WalkBuilder::new(starting_path) {
         Ok(builder) => {
-            debug!("Created WalkBuilder for: {}", starting_path.display());
+            debug!(path = %starting_path.display(), "Created WalkBuilder");
             builder
         }
         Err(error) => {
             error!(
-                "Failed to create WalkBuilder for {}: {error}",
-                starting_path.display()
+                error = ?error,
+                path = %starting_path.display(),
+                "Failed to create WalkBuilder"
             );
             return None;
         }
@@ -203,7 +216,7 @@ fn configure_builder(
         flags |= WalkFlags::SKIP_HIDDEN;
         debug!("Hidden files/dirs will be skipped");
     }
-    debug!("Walk flags set: {flags:?}");
+    debug!(?flags, "Walk flags set");
     builder.options(flags);
     builder.threads(threads);
 
@@ -217,7 +230,7 @@ fn configure_builder(
                 builder.include_flags(COARSE_GATE_FLAGS);
             }
             Err(error) => {
-                error!("Invalid native include pattern, using Rust filter: {error}");
+                error!(error = ?error, "Invalid native include pattern, using Rust filter");
             }
         }
     }
@@ -226,7 +239,7 @@ fn configure_builder(
     if !rules.is_empty()
         && let Err(error) = builder.extra_ignore(&rules)
     {
-        error!("Failed to install native ignore rules: {error}");
+        error!(error = ?error, "Failed to install native ignore rules");
     }
     Some(builder)
 }
@@ -248,8 +261,8 @@ struct NativeIgnores {
 }
 
 struct WalkFilters<'a> {
-    allow: Option<HashSet<String>>,
-    block: Option<HashSet<String>>,
+    allow: Option<AHashSet<String>>,
+    block: Option<AHashSet<String>>,
     block_exts: Option<&'a [String]>,
     native: NativeIgnores,
 }
@@ -273,38 +286,32 @@ impl<'a> WalkFilters<'a> {
 
     fn file_filter(&self, file_path: &Path) -> bool {
         if let Some(allow) = &self.allow {
-            trace!("Applying allowlist to file: {}", file_path.display());
+            trace!(path = %file_path.display(), "Applying allowlist to file");
             if !extension_matches(allow, file_path) {
-                trace!(
-                    "Allowlist does not contain extension: {}",
-                    file_path.display()
-                );
+                trace!(path = %file_path.display(), "Allowlist does not contain extension");
                 return false;
             }
-            trace!("Allowlist contains extension: {}", file_path.display());
+            trace!(path = %file_path.display(), "Allowlist contains extension");
         } else {
-            trace!("Not applying allowlist to file: {}", file_path.display());
+            trace!(path = %file_path.display(), "Not applying allowlist to file");
         }
 
         if self.native.exts {
             trace!("Native ignores cover the blocklist, skipping Rust check");
         } else if let Some(block) = &self.block {
-            trace!("Applying blocklist to file: {}", file_path.display());
+            trace!(path = %file_path.display(), "Applying blocklist to file");
             if extension_matches(block, file_path) {
-                trace!("Blocklist contains file extension: {}", file_path.display());
+                trace!(path = %file_path.display(), "Blocklist contains file extension");
                 return false;
             }
-            trace!(
-                "Blocklist does not contain file extension: {}",
-                file_path.display()
-            );
+            trace!(path = %file_path.display(), "Blocklist does not contain file extension");
         } else {
-            trace!("Not applying blocklist to file: {}", file_path.display());
+            trace!(path = %file_path.display(), "Not applying blocklist to file");
         }
 
         if !self.native.ouroboros {
             if let Some(name) = file_path.file_name() {
-                trace!("Successfully got filename: {}", name.to_string_lossy());
+                trace!(name = %name.to_string_lossy(), "Successfully got filename");
                 if name == OsStr::new(STATUS_FILENAME.as_str())
                     || name == OsStr::new(ANALYSIS_FILENAME.as_str())
                 {
@@ -312,21 +319,21 @@ impl<'a> WalkFilters<'a> {
                     return false;
                 }
             } else {
-                error!("Failed to get filename: {}", file_path.display());
+                error!(path = %file_path.display(), "Failed to get filename");
                 return false;
             }
         }
 
-        trace!("{} matches: true", file_path.display());
+        trace!(path = %file_path.display(), "File matches: true");
         true
     }
 }
 
-fn lowercase_exts(exts: &[String]) -> HashSet<String> {
+fn lowercase_exts(exts: &[String]) -> AHashSet<String> {
     exts.iter().map(|ext| ext.to_ascii_lowercase()).collect()
 }
 
-fn extension_matches(set: &HashSet<String>, file_path: &Path) -> bool {
+fn extension_matches(set: &AHashSet<String>, file_path: &Path) -> bool {
     let Some(ext) = file_path.extension().and_then(OsStr::to_str) else {
         return false;
     };
@@ -335,7 +342,7 @@ fn extension_matches(set: &HashSet<String>, file_path: &Path) -> bool {
         for (slot, byte) in buf.iter_mut().zip(ext.bytes()) {
             *slot = byte.to_ascii_lowercase();
         }
-        if let Ok(folded) = std::str::from_utf8(&buf[..ext.len()]) {
+        if let Ok(folded) = from_utf8(&buf[..ext.len()]) {
             return set.contains(folded);
         }
     }
@@ -350,12 +357,9 @@ fn per_root_threads(threads: usize, roots: usize) -> usize {
 }
 
 fn send_path(sender: &Sender<Arc<PathBuf>>, path: PathBuf) {
-    trace!(
-        "Sending path to crypto/analysis/canary thread: {}",
-        path.display()
-    );
+    trace!(path = %path.display(), "Sending path to crypto/analysis/canary thread");
     if let Err(error) = sender.send(Arc::new(path)) {
-        error!("Failed to send path to crypto/analysis/canary thread: {error}");
+        error!(error = ?error, "Failed to send path to crypto/analysis/canary thread");
     }
 }
 
@@ -364,14 +368,13 @@ fn spawn_coordinator(
     allow_exts: Option<&[String]>,
     block_exts: Option<&[String]>,
     body: impl FnOnce(Option<Vec<String>>, Option<Vec<String>>) + Send + 'static,
-) -> thread::JoinHandle<()> {
-    debug!("Starting {label} coordinator thread");
+) -> io::Result<JoinHandle<()>> {
+    debug!(label, "Starting coordinator thread");
     let allow_owned = allow_exts.map(<[String]>::to_vec);
     let block_owned = block_exts.map(<[String]>::to_vec);
     thread::Builder::new()
         .stack_size(WALK_COORDINATOR_STACK_SIZE)
         .spawn(move || body(allow_owned, block_owned))
-        .expect("Failed to spawn walk coordinator thread")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -394,10 +397,7 @@ fn run_root(
     ) else {
         return;
     };
-    debug!(
-        "Starting zlob walk for: {} with {threads} worker threads",
-        starting_path.display()
-    );
+    debug!(path = %starting_path.display(), ?threads, "Starting zlob walk");
     let result = builder.visit(|entry| {
         let result = catch_unwind(AssertUnwindSafe(|| {
             process_walk_entry(entry, sender, filters, max_file_bytes, matched, filtered)
@@ -406,8 +406,9 @@ fn run_root(
             Ok(state) => state,
             Err(payload) => {
                 error!(
-                    "Walk visitor recovered from panic on {}: {payload:?}",
-                    entry.path().display()
+                    path = %entry.path().display(),
+                    ?payload,
+                    "Walk visitor recovered from panic"
                 );
                 WalkState::Continue
             }
@@ -416,14 +417,14 @@ fn run_root(
     match result {
         Ok(()) => {
             debug!(
-                "Walk finished for {}: matched={} filtered={}",
-                starting_path.display(),
-                matched.load(Ordering::Relaxed),
-                filtered.load(Ordering::Relaxed)
+                path = %starting_path.display(),
+                matched = matched.load(Ordering::Relaxed),
+                filtered = filtered.load(Ordering::Relaxed),
+                "Walk finished"
             );
         }
         Err(error) => {
-            error!("Walk error for {}: {error}", starting_path.display());
+            error!(error = ?error, path = %starting_path.display(), "Walk error");
         }
     }
 }
@@ -444,41 +445,35 @@ fn collect_root(
     ) else {
         return Vec::new();
     };
-    debug!(
-        "Starting zlob collect for: {} with {threads} worker threads",
-        starting_path.display()
-    );
-    let results = match builder.collect() {
-        Ok(results) => results,
-        Err(error) => {
-            error!("Walk error for {}: {error}", starting_path.display());
-            return Vec::new();
+    debug!(path = %starting_path.display(), ?threads, "Starting zlob collect");
+    let found = Mutex::new(Vec::new());
+    let result = builder.visit(|entry| {
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            process_collect_entry(entry, filters, max_file_bytes, &found)
+        }));
+        match result {
+            Ok(state) => state,
+            Err(payload) => {
+                error!(
+                    path = %entry.path().display(),
+                    ?payload,
+                    "Collect visitor recovered from panic"
+                );
+                WalkState::Continue
+            }
         }
-    };
-
-    debug!(
-        "Walked {} entries in {}",
-        results.len(),
-        starting_path.display()
-    );
-
-    let mut found = Vec::new();
-    for entry in results.iter() {
-        if !entry.is_file() {
-            continue;
-        }
-        if oversize(entry.size(), max_file_bytes) {
-            trace!(
-                "Entry exceeds size limit, skipping: {}",
-                entry.path().display()
+    });
+    let found = found.into_inner().unwrap_or_else(PoisonError::into_inner);
+    match result {
+        Ok(()) => {
+            debug!(
+                path = %starting_path.display(),
+                found = found.len(),
+                "Collect finished"
             );
-            continue;
         }
-        if filters.should_include(entry.path()) {
-            trace!("Entry matched filter: {}", entry.path().display());
-            found.push(entry.path().to_path_buf());
-        } else {
-            trace!("Entry did not match filter: {}", entry.path().display());
+        Err(error) => {
+            error!(error = ?error, path = %starting_path.display(), "Walk error");
         }
     }
     found
@@ -499,7 +494,7 @@ pub fn walk_with_exts(
     block_exts: Option<&[String]>,
     threads: usize,
     max_file_bytes: Option<u64>,
-) -> thread::JoinHandle<()> {
+) -> io::Result<JoinHandle<()>> {
     spawn_coordinator(
         "walk",
         allow_exts,
@@ -512,7 +507,7 @@ pub fn walk_with_exts(
                 debug!("Extension allowlist is empty, nothing to walk");
                 return;
             }
-            debug!("Native allow plan: {plan:?}");
+            debug!(?plan, "Native allow plan");
             let native = native_ignore_coverage(block_exts);
             let filters = WalkFilters::new(allow_exts, block_exts, native);
             let per_root = per_root_threads(threads, config::ALLOWLIST_PATHS.len());
@@ -538,16 +533,17 @@ pub fn walk_with_exts(
                         });
                     if let Err(error) = spawned {
                         error!(
-                            "Failed to spawn walk thread for {}: {error}",
-                            starting_path.display()
+                            error = ?error,
+                            path = %starting_path.display(),
+                            "Failed to spawn walk thread"
                         );
                     }
                 }
             });
             debug!(
-                "Walk complete: matched={} filtered={}",
-                matched.load(Ordering::Relaxed),
-                filtered.load(Ordering::Relaxed)
+                matched = matched.load(Ordering::Relaxed),
+                filtered = filtered.load(Ordering::Relaxed),
+                "Walk complete"
             );
         },
     )
@@ -559,7 +555,7 @@ pub fn random_walk_with_exts(
     block_exts: Option<&[String]>,
     threads: usize,
     max_file_bytes: Option<u64>,
-) -> thread::JoinHandle<()> {
+) -> io::Result<JoinHandle<()>> {
     spawn_coordinator(
         "random walk",
         allow_exts,
@@ -572,7 +568,7 @@ pub fn random_walk_with_exts(
                 debug!("Extension allowlist is empty, nothing to walk");
                 return;
             }
-            debug!("Native allow plan: {plan:?}");
+            debug!(?plan, "Native allow plan");
             let native = native_ignore_coverage(block_exts);
             let filters = WalkFilters::new(allow_exts, block_exts, native);
             let per_root = per_root_threads(threads, config::ALLOWLIST_PATHS.len());
@@ -590,8 +586,9 @@ pub fn random_walk_with_exts(
                         Ok(handle) => handles.push((starting_path, handle)),
                         Err(error) => {
                             error!(
-                                "Failed to spawn collect thread for {}: {error}",
-                                starting_path.display()
+                                error = ?error,
+                                path = %starting_path.display(),
+                                "Failed to spawn collect thread"
                             );
                         }
                     }
@@ -600,7 +597,7 @@ pub fn random_walk_with_exts(
                     match handle.join() {
                         Ok(mut paths) => found_paths.append(&mut paths),
                         Err(_) => {
-                            error!("Collect thread panicked for {}", starting_path.display());
+                            error!(path = %starting_path.display(), "Collect thread panicked");
                         }
                     }
                 }
@@ -609,6 +606,29 @@ pub fn random_walk_with_exts(
             shuffle_and_send_path(&sender, found_paths);
         },
     )
+}
+
+fn process_collect_entry(
+    entry: WalkEntry<'_>,
+    filters: &WalkFilters<'_>,
+    max_file_bytes: Option<u64>,
+    found: &Mutex<Vec<PathBuf>>,
+) -> WalkState {
+    if entry.is_file() {
+        if oversize(entry.size(), max_file_bytes) {
+            trace!(path = %entry.path().display(), "Entry exceeds size limit, skipping");
+        } else if filters.should_include(entry.path()) {
+            trace!(path = %entry.path().display(), "Entry matched filter");
+            found
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(entry.path().to_path_buf());
+        } else {
+            trace!(path = %entry.path().display(), "Entry did not match filter");
+        }
+    }
+
+    WalkState::Continue
 }
 
 fn process_walk_entry(
@@ -621,17 +641,14 @@ fn process_walk_entry(
 ) -> WalkState {
     if entry.is_file() {
         if oversize(entry.size(), max_file_bytes) {
-            trace!(
-                "Entry exceeds size limit, skipping: {}",
-                entry.path().display()
-            );
+            trace!(path = %entry.path().display(), "Entry exceeds size limit, skipping");
             filtered.fetch_add(1, Ordering::Relaxed);
         } else if filters.should_include(entry.path()) {
-            trace!("Entry matched filter: {}", entry.path().display());
+            trace!(path = %entry.path().display(), "Entry matched filter");
             matched.fetch_add(1, Ordering::Relaxed);
             send_path(sender, entry.path().to_path_buf());
         } else {
-            trace!("Entry did not match filter: {}", entry.path().display());
+            trace!(path = %entry.path().display(), "Entry did not match filter");
             filtered.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -644,7 +661,7 @@ fn is_blocked(entry_path: &Path) -> bool {
         paths.iter().any(|blocked| {
             let hit = entry_path.starts_with(blocked);
             if hit {
-                debug!("Blocklist contains entry: {}", entry_path.display());
+                debug!(path = %entry_path.display(), "Blocklist contains entry");
             }
             hit
         })

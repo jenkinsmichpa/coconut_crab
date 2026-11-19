@@ -1,10 +1,10 @@
-use axum::http::StatusCode;
+use coconut_crab_lib::web::codes::RECOVERY_REQUEST_CODE;
 use hex::{decode, encode};
-use log::{debug, error};
 use purecrypto::rsa::BoxedRsaPrivateKey;
 use rand::{RngExt, distr::Alphanumeric};
+use tracing::{debug, error};
 
-use coconut_crab_lib::web::codes::RECOVERY_REQUEST_CODE;
+use crate::extract::ApiError;
 
 const CODE_LEN: usize = 19;
 
@@ -31,17 +31,14 @@ pub fn generate_code() -> String {
     code
 }
 
-pub fn decrypt_key(
-    private_key: &BoxedRsaPrivateKey,
-    key: &str,
-) -> Result<String, (StatusCode, &'static str)> {
+pub fn decrypt_key(private_key: &BoxedRsaPrivateKey, key: &str) -> Result<String, ApiError> {
     let key_vec = decode(key).map_err(|error| {
-        error!("Failed To Decode Key: {error}");
-        (StatusCode::BAD_REQUEST, "Invalid Key")
+        error!(error = ?error, "Failed to decode key");
+        ApiError::InvalidKey
     })?;
     let key = private_key.decrypt_pkcs1v15(&key_vec).map_err(|error| {
-        error!("Failed To Decrypt Key: {error}");
-        (StatusCode::BAD_REQUEST, "Invalid Key")
+        error!(error = ?error, "Failed to decrypt key");
+        ApiError::InvalidKey
     })?;
     Ok(encode(key))
 }

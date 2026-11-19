@@ -1,8 +1,8 @@
-use log::debug;
+use coconut_crab_lib::web::validate::{validate_code, validate_code_segment};
 use slint::ComponentHandle;
+use tracing::debug;
 
 use crate::Main;
-use coconut_crab_lib::web::validate::{validate_code, validate_code_segment};
 
 pub fn callback_handler_init(ui: &Main) {
     ui.on_enforce_code_segment_format(move |new_text| {
@@ -12,7 +12,7 @@ pub fn callback_handler_init(ui: &Main) {
             .filter(char::is_ascii_alphanumeric)
             .take(4)
             .collect();
-        debug!("Formatted field: {alphanumeric_string}");
+        debug!(field = %alphanumeric_string, "Formatted field");
         alphanumeric_string.into()
     });
 
@@ -37,7 +37,7 @@ pub fn callback_handler_init(ui: &Main) {
                 ui.get_code_segment_3(),
                 ui.get_code_segment_4()
             );
-            debug!("Validating combined code: {code}");
+            debug!("Validating combined code");
             let valid = validate_code(&code);
             ui.set_code(code.into());
 

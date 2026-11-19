@@ -19,16 +19,16 @@ LegalCopyright = "jenkinsmichpa"
 
 [dependencies]
 coconut_crab_lib = { workspace = true }
+ahash = { workspace = true }
+anyhow = { workspace = true }
 auto-launch = { workspace = true }
 hex = { workspace = true }
 rand = { workspace = true }
 purecrypto = { workspace = true, features = ["rsa", "cipher", "der", "std"] }
-zeroize = { workspace = true }
 serde = { workspace = true }
 csv = { workspace = true }
 hostname = { workspace = true }
 litcrypt2 = { workspace = true }
-log = { workspace = true }
 rust-embed = { workspace = true, features = ["include-exclude"] }
 slint = { workspace = true, features = [
   "std",
@@ -54,9 +54,10 @@ image = { workspace = true, features = [
   "tiff",
   "webp",
 ] }
-env_logger = { workspace = true }
 flume = { workspace = true }
 regex = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 zip = { workspace = true, features = [
   "deflate-flate2-zlib-rs",
 ] }

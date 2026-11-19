@@ -1,16 +1,17 @@
-use log::{debug, error};
 use std::time::SystemTime;
+
+use tracing::{debug, error};
 
 use crate::config;
 
-pub fn get_epoch_time() -> Option<i64> {
+pub fn epoch_time() -> Option<i64> {
     match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
         Ok(time) => {
-            debug!("Reported Time: {time:?}");
+            debug!(?time, "Reported time");
             Some(time.as_secs().cast_signed())
         }
         Err(error) => {
-            error!("Reported time before UNIX Epoch: {error}");
+            error!(error = ?error, "Reported time before UNIX Epoch");
             None
         }
     }
@@ -23,7 +24,7 @@ pub fn is_recovery_valid(upload_time: Option<i64>, complete: bool) -> bool {
     let Some(upload_time) = upload_time else {
         return false;
     };
-    let Some(current_time) = get_epoch_time() else {
+    let Some(current_time) = epoch_time() else {
         return false;
     };
     let elapsed = current_time.saturating_sub(upload_time);

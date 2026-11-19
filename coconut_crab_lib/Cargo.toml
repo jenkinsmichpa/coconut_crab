@@ -13,12 +13,13 @@ categories.workspace = true
 [dependencies]
 serde = { workspace = true }
 regex = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 rust-embed = { workspace = true, features = ["include-exclude"] }
 ureq = { workspace = true, features = ["json", "rustls"] }
 hex = { workspace = true }
 purecrypto = { workspace = true, features = ["hash", "std"] }
 litcrypt2 = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

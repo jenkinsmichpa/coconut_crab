@@ -11,6 +11,7 @@ keywords = ["docx", "education", "incident-response"]
 categories = ["education", "security"]
 
 [dependencies]
+anyhow = { workspace = true }
 docx-rust = { workspace = true }
 hex = { workspace = true }
 rand = { workspace = true }

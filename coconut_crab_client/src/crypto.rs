@@ -1,24 +1,28 @@
-use hex::encode;
-use log::{debug, error};
-use purecrypto::{cipher::ChaCha20Poly1305, rng::OsRng, rsa::BoxedRsaPublicKey};
-use rand::RngExt;
 use std::{
     fs::{self, File},
-    io::{Error, Read, Write},
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
+use anyhow::{Context, anyhow, bail};
 use coconut_crab_lib::web::validate::decode_hex;
+use hex::encode;
+use purecrypto::{
+    cipher::ChaCha20Poly1305,
+    rng::{OsRng, RngCore},
+    rsa::BoxedRsaPublicKey,
+};
+use tracing::{debug, error};
 
 pub fn generate_nonce() -> [u8; 12] {
     let mut nonce = [0u8; 12];
-    rand::rng().fill(&mut nonce);
+    OsRng.fill_bytes(&mut nonce);
     nonce
 }
 
 pub fn generate_sym_key() -> [u8; 32] {
     let mut key = [0u8; 32];
-    rand::rng().fill(&mut key);
+    OsRng.fill_bytes(&mut key);
     debug!("Generated symmetric key");
     key
 }
@@ -28,8 +32,7 @@ pub fn encrypted_file_path(source: &Path, nonce: &[u8; 12], extension: &str) -> 
     let mut path = source.to_path_buf();
     let name = path
         .file_name()
-        .map(|file_name| file_name.to_string_lossy().into_owned())
-        .unwrap_or_default();
+        .map_or_default(|file_name| file_name.to_string_lossy().into_owned());
     path.set_file_name(format!("{name}.{nonce_ext}"));
     path
 }
@@ -56,23 +59,34 @@ pub fn aead_encrypt_file(
     full_nonce_bytes: &[u8; 12],
     aad: &[u8],
     max_file_bytes: u64,
-) -> Result<(), Error> {
-    let result = (|| -> Result<(), Error> {
+) -> anyhow::Result<()> {
+    let result = (|| -> anyhow::Result<()> {
         let cipher = ChaCha20Poly1305::new(key);
-        let mut source = File::open(source_file_path)?;
-        let source_len = source.metadata()?.len();
+        let mut source = File::open(source_file_path)
+            .with_context(|| format!("failed to open file {}", source_file_path.display()))?;
+        let source_len = source
+            .metadata()
+            .with_context(|| format!("failed to read metadata of {}", source_file_path.display()))?
+            .len();
         if source_len > max_file_bytes {
-            return Err(Error::other(format!(
-                "File size {source_len} exceeds in-memory encryption limit {max_file_bytes}; skipping"
-            )));
+            bail!(
+                "file size {source_len} exceeds in-memory encryption limit {max_file_bytes}; skipping"
+            );
         }
-        let mut dest = File::create(destination_file_path)?;
+        let mut dest = File::create(destination_file_path).with_context(|| {
+            format!("failed to create file {}", destination_file_path.display())
+        })?;
         let mut data = Vec::with_capacity(usize::try_from(source_len).unwrap_or(0));
-        source.read_to_end(&mut data)?;
+        source
+            .read_to_end(&mut data)
+            .with_context(|| format!("failed to read file {}", source_file_path.display()))?;
         let tag = cipher.encrypt(full_nonce_bytes, aad, &mut data);
-        dest.write_all(&data)?;
-        dest.write_all(&tag)?;
-        dest.sync_all()?;
+        dest.write_all(&data)
+            .with_context(|| format!("failed to write file {}", destination_file_path.display()))?;
+        dest.write_all(&tag)
+            .with_context(|| format!("failed to write file {}", destination_file_path.display()))?;
+        dest.sync_all()
+            .with_context(|| format!("failed to sync file {}", destination_file_path.display()))?;
         Ok(())
     })();
     if result.is_err() {
@@ -88,25 +102,30 @@ pub fn aead_decrypt_file(
     full_nonce_bytes: &[u8; 12],
     aad: &[u8],
     max_file_bytes: u64,
-) -> Result<(), Error> {
+) -> anyhow::Result<()> {
     let cipher = ChaCha20Poly1305::new(key);
-    let mut source = File::open(source_file_path)?;
+    let mut source = File::open(source_file_path)
+        .with_context(|| format!("failed to open file {}", source_file_path.display()))?;
 
     let mut tmp_path = destination_file_path.as_os_str().to_os_string();
     tmp_path.push(".tmp");
     let tmp_path = PathBuf::from(tmp_path);
-    let result = (|| -> Result<(), Error> {
-        let source_len = source.metadata()?.len();
+    let result = (|| -> anyhow::Result<()> {
+        let source_len = source
+            .metadata()
+            .with_context(|| format!("failed to read metadata of {}", source_file_path.display()))?
+            .len();
         if source_len > max_file_bytes.saturating_add(16) {
-            return Err(Error::other(format!(
-                "Encrypted file size {source_len} exceeds in-memory decryption limit; skipping"
-            )));
+            bail!("encrypted file size {source_len} exceeds in-memory decryption limit; skipping");
         }
-        let mut dest = File::create(&tmp_path)?;
+        let mut dest = File::create(&tmp_path)
+            .with_context(|| format!("failed to create file {}", tmp_path.display()))?;
         let mut data = Vec::with_capacity(usize::try_from(source_len).unwrap_or(0));
-        source.read_to_end(&mut data)?;
+        source
+            .read_to_end(&mut data)
+            .with_context(|| format!("failed to read file {}", source_file_path.display()))?;
         if data.len() < 16 {
-            return Err(Error::other("Encrypted file shorter than Poly1305 tag"));
+            bail!("encrypted file shorter than Poly1305 tag");
         }
         let cipher_len = data.len() - 16;
         let mut tag = [0u8; 16];
@@ -114,14 +133,18 @@ pub fn aead_decrypt_file(
         data.truncate(cipher_len);
         cipher
             .decrypt(full_nonce_bytes, aad, &mut data, &tag)
-            .map_err(|_| Error::other("ChaCha20-Poly1305 authentication failed"))?;
-        dest.write_all(&data)?;
-        dest.sync_all()?;
+            .map_err(|_| anyhow!("ChaCha20-Poly1305 authentication failed"))?;
+        dest.write_all(&data)
+            .with_context(|| format!("failed to write file {}", tmp_path.display()))?;
+        dest.sync_all()
+            .with_context(|| format!("failed to sync file {}", tmp_path.display()))?;
         Ok(())
     })();
     match result {
         Ok(()) => {
-            fs::rename(&tmp_path, destination_file_path)?;
+            fs::rename(&tmp_path, destination_file_path).with_context(|| {
+                format!("failed to replace file {}", destination_file_path.display())
+            })?;
             Ok(())
         }
         Err(error) => {
@@ -139,7 +162,7 @@ pub fn encrypt_string(
 ) -> (Vec<u8>, [u8; 16]) {
     let mut source_data = source.as_bytes().to_vec();
     let tag = ChaCha20Poly1305::new(key).encrypt(full_nonce_bytes, aad, &mut source_data);
-    debug!("String encrypted ({} bytes)", source_data.len());
+    debug!(bytes = source_data.len(), "String encrypted");
     (source_data, tag)
 }
 
@@ -156,14 +179,11 @@ pub fn decrypt_string(
         .ok()?;
     match String::from_utf8(source_data) {
         Ok(string) => {
-            debug!(
-                "Successfully decoded bytes to string ({} chars)",
-                string.len()
-            );
+            debug!(chars = string.len(), "Successfully decoded bytes to string");
             Some(string)
         }
         Err(error) => {
-            error!("Failed to decode bytes to string: {error}");
+            error!(error = ?error, "Failed to decode bytes to string");
             None
         }
     }
@@ -172,9 +192,9 @@ pub fn decrypt_string(
 pub fn encrypt_sym_key(
     asym_pub_key: &BoxedRsaPublicKey,
     sym_key: &[u8; 32],
-) -> Result<Vec<u8>, String> {
+) -> anyhow::Result<Vec<u8>> {
     let mut rng = OsRng;
     asym_pub_key
         .encrypt_pkcs1v15(sym_key, &mut rng)
-        .map_err(|error| format!("Failed to encrypt symmetric key: {error}"))
+        .context("failed to encrypt symmetric key")
 }
