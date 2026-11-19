@@ -138,6 +138,7 @@ Variable | Summary
 PORT | web server port (must match client)
 HTTPS | whether the web server should use HTTP or HTTPS with TLS
 RECOVERY_WINDOW_SECONDS | time period that a symmetric key can be recovered if lost by client
+FIRST_REQUEST_TIMEOUT_SECONDS | time a client has to send its first request before the connection is closed
 PRESHARED_SECRET | code used to validate web requests (must match client)
 BYPASS_CODE | code used to unlock decryption on any victim
 

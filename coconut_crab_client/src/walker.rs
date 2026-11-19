@@ -398,7 +398,7 @@ fn run_root(
         "Starting zlob walk for: {} with {threads} worker threads",
         starting_path.display()
     );
-    let result = builder.run(|entry| {
+    let result = builder.visit(|entry| {
         let result = catch_unwind(AssertUnwindSafe(|| {
             process_walk_entry(entry, sender, filters, max_file_bytes, matched, filtered)
         }));
@@ -414,7 +414,7 @@ fn run_root(
         }
     });
     match result {
-        Ok(_) => {
+        Ok(()) => {
             debug!(
                 "Walk finished for {}: matched={} filtered={}",
                 starting_path.display(),

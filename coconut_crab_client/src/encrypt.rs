@@ -121,7 +121,9 @@ pub fn run_encryption_pipeline(cfg: EncryptionPipeline<'_>) -> Result<(), String
     }
 
     for handle in thread_handles {
-        handle.join().expect("Thread panicked");
+        if handle.join().is_err() {
+            error!("Encryption worker thread panicked");
+        }
     }
 
     cfg.status.encryption_complete = true;

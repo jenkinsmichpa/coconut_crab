@@ -113,7 +113,7 @@ fn ensure_id(id: &str) -> Result<(), Rejection> {
 
 fn ensure_proof_shape(id: &str, proof: &str) -> Result<(), Rejection> {
     if !validate_proof(proof) {
-        warn!("[{id}] Invalid Proof: {proof}");
+        warn!("[{id}] Invalid Proof shape");
         return Err((StatusCode::BAD_REQUEST, "Invalid Proof"));
     }
     Ok(())
@@ -121,10 +121,10 @@ fn ensure_proof_shape(id: &str, proof: &str) -> Result<(), Rejection> {
 
 fn ensure_proof(id: &str, proof_source: &[u8], proof: &str) -> Result<(), Rejection> {
     if !check_proof(proof_source, config::PRESHARED_SECRET, proof) {
-        warn!("[{id}] Proof Verification Failure: {proof}");
+        warn!("[{id}] Proof Verification Failure");
         return Err((StatusCode::FORBIDDEN, "Invalid Proof"));
     }
-    debug!("[{id}] Proof Verification Success: {proof}");
+    debug!("[{id}] Proof Verification Success");
     Ok(())
 }
 

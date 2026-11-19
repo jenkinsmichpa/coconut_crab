@@ -53,12 +53,13 @@ use_litcrypt!();
 slint::include_modules!();
 
 fn main() -> ExitCode {
-    let level = if cfg!(debug_assertions) {
-        log::LevelFilter::Info
+    let default_level = if cfg!(debug_assertions) {
+        "info"
     } else {
-        log::LevelFilter::Off
+        "off"
     };
-    env_logger::Builder::new().filter_level(level).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_level))
+        .init();
 
     match run() {
         Ok(()) => ExitCode::SUCCESS,

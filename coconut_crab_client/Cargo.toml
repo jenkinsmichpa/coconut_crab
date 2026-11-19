@@ -2,6 +2,7 @@
 name = "coconut_crab_client"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 build = "build.rs"
 description = "Simulated ransomware client for incident response testing"
 license.workspace = true

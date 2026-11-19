@@ -3,7 +3,8 @@ use std::env;
 fn main() {
     println!("cargo:rerun-if-changed=ui/main.slint");
     println!("cargo:rerun-if-changed=assets/img/favicon.ico");
-    slint_build::compile("ui/main.slint").expect("Failed to get Slint UI file");
+    let config = slint_build::CompilerConfiguration::new().with_edition((1, 19));
+    slint_build::compile_with_config("ui/main.slint", config).expect("Failed to get Slint UI file");
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         embed_manifest::embed_manifest(embed_manifest::new_manifest("CoconutCrab.Client"))

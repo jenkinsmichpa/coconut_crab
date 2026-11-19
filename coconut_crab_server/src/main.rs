@@ -1,7 +1,7 @@
 use axum::{Router, routing::post};
 use axum_embed::ServeEmbed;
 use axum_server::tls_rustls::RustlsConfig;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use purecrypto::rsa::BoxedRsaPrivateKey;
 use rust_embed::RustEmbed;
 use std::{future, net::SocketAddr, sync::Arc, time::Duration};
@@ -62,6 +62,10 @@ fn spawn_shutdown_signal(handle: axum_server::Handle<SocketAddr>) {
     });
 }
 
+fn log_accept_error(addr: Option<&SocketAddr>, error: &std::io::Error) {
+    warn!("Failed to accept connection from {addr:?}: {error}");
+}
+
 #[derive(Clone)]
 pub(crate) struct AppState {
     db: toasty::Db,
@@ -78,9 +82,7 @@ struct AssetPrivate;
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Info)
-        .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let exe_directory_path = get_exe_path_dir().unwrap_or_else(|error| {
         error!("Cannot determine executable directory: {error}");
@@ -145,6 +147,10 @@ async fn main() {
         let server = axum_server::bind_rustls(addr, tls_config);
         server
             .handle(handle)
+            .first_request_timeout(Some(Duration::from_secs(
+                config::FIRST_REQUEST_TIMEOUT_SECONDS,
+            )))
+            .accept_error_handler(log_accept_error)
             .serve(app.into_make_service())
             .await
             .expect("Failed to start web server");
@@ -152,6 +158,10 @@ async fn main() {
         let server = axum_server::bind(addr);
         server
             .handle(handle)
+            .first_request_timeout(Some(Duration::from_secs(
+                config::FIRST_REQUEST_TIMEOUT_SECONDS,
+            )))
+            .accept_error_handler(log_accept_error)
             .serve(app.into_make_service())
             .await
             .expect("Failed to start web server");

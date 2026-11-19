@@ -135,7 +135,9 @@ fn decrypt_files(
     drop(dec_walk_rx);
 
     for handle in thread_handles {
-        handle.join().expect("Thread panicked");
+        if handle.join().is_err() {
+            error!("Decryption worker thread panicked");
+        }
     }
 
     if let Ok(mut key) = Arc::try_unwrap(sym_key_arc) {

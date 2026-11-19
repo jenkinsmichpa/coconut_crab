@@ -4,6 +4,7 @@ pub mod structs {
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug)]
+    #[serde(deny_unknown_fields)]
     pub struct Registration {
         pub id: String,
         pub hostname: String,
@@ -11,6 +12,7 @@ pub mod structs {
     }
 
     #[derive(Serialize, Deserialize, Debug)]
+    #[serde(deny_unknown_fields)]
     pub struct UploadSymKey {
         pub id: String,
         pub key: String,
@@ -18,12 +20,14 @@ pub mod structs {
     }
 
     #[derive(Serialize, Deserialize, Debug)]
+    #[serde(deny_unknown_fields)]
     pub struct AnnounceCompletion {
         pub id: String,
         pub proof: String,
     }
 
     #[derive(Serialize, Deserialize, Debug)]
+    #[serde(deny_unknown_fields)]
     pub struct DownloadSymKey {
         pub id: String,
         pub code: String,
@@ -287,7 +291,7 @@ mod ureq_client {
             let mut response = agent.post(url).send_json(json)?;
             debug!("Received server response to POST: {response:?}");
             let text = response.body_mut().read_to_string()?;
-            debug!("Successfully read content text from response: {text}");
+            debug!("Successfully read {} response bytes", text.len());
             Ok(text)
         })
     }

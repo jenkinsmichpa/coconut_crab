@@ -2,6 +2,7 @@
 name = "coconut_crab_lib"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Library for coconut_crab packages"
 license.workspace = true
 repository.workspace = true

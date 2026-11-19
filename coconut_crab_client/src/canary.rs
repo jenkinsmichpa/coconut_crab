@@ -331,7 +331,10 @@ fn analyze_zip_bytes(
             total_analyzed += zipped_file_data.len() as u64;
 
             if analyze_file_data(&zipped_file_data, avoid_keywords, avoid_urls) {
-                info!("Zipped file flagged by analysis: {}", String::from_utf8_lossy(entry.name_raw()));
+                info!(
+                    "Zipped file flagged by analysis: {}",
+                    String::from_utf8_lossy(entry.name_raw())
+                );
                 return Ok(true);
             }
         } else {
