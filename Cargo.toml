@@ -26,6 +26,10 @@ categories = ["simulation", "security"]
 [workspace.lints.rust]
 unsafe_code = "deny"
 
+[workspace.lints.cargo]
+unused_dependencies = "warn"
+unused_workspace_dependencies = "warn"
+
 [workspace.lints.clippy]
 correctness = { level = "warn", priority = -1 }
 perf = { level = "warn", priority = -1 }
@@ -33,6 +37,7 @@ complexity = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 style = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
 coconut_crab_lib = { path = "coconut_crab_lib" }
