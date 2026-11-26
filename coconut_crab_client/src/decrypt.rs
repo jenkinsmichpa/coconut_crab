@@ -25,7 +25,7 @@ use crate::{
     walker::walk_with_exts,
 };
 
-pub struct DecryptConfig {
+pub(crate) struct DecryptConfig {
     pub status: Status,
     pub conn: ServerConn,
     pub preshared_secret: &'static str,
@@ -48,7 +48,7 @@ fn set_ui_status(ui: &Weak<Main>, text: &str, progress: Option<bool>) {
     }
 }
 
-pub fn spawn_decryption_handler(
+pub(crate) fn spawn_decryption_handler(
     ui: &Main,
     config: DecryptConfig,
 ) -> io::Result<SyncSender<String>> {

@@ -4,7 +4,7 @@ use tracing::debug;
 
 use crate::Main;
 
-pub fn callback_handler_init(ui: &Main) {
+pub(crate) fn callback_handler_init(ui: &Main) {
     ui.on_enforce_code_segment_format(move |new_text| {
         let text = new_text.as_str();
         let alphanumeric_string: String = text

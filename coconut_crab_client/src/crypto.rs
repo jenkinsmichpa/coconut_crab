@@ -14,20 +14,20 @@ use purecrypto::{
 };
 use tracing::{debug, error};
 
-pub fn generate_nonce() -> [u8; 12] {
+pub(crate) fn generate_nonce() -> [u8; 12] {
     let mut nonce = [0u8; 12];
     OsRng.fill_bytes(&mut nonce);
     nonce
 }
 
-pub fn generate_sym_key() -> [u8; 32] {
+pub(crate) fn generate_sym_key() -> [u8; 32] {
     let mut key = [0u8; 32];
     OsRng.fill_bytes(&mut key);
     debug!("Generated symmetric key");
     key
 }
 
-pub fn encrypted_file_path(source: &Path, nonce: &[u8; 12], extension: &str) -> PathBuf {
+pub(crate) fn encrypted_file_path(source: &Path, nonce: &[u8; 12], extension: &str) -> PathBuf {
     let nonce_ext = format!("{}.{extension}", encode(nonce));
     let mut path = source.to_path_buf();
     let name = path
@@ -37,7 +37,7 @@ pub fn encrypted_file_path(source: &Path, nonce: &[u8; 12], extension: &str) -> 
     path
 }
 
-pub fn parse_encrypted_file_name(
+pub(crate) fn parse_encrypted_file_name(
     file_name: &str,
     expected_ext: &str,
 ) -> Option<(String, [u8; 12])> {
@@ -52,7 +52,7 @@ pub fn parse_encrypted_file_name(
     Some((original.to_string(), nonce))
 }
 
-pub fn aead_encrypt_file(
+pub(crate) fn aead_encrypt_file(
     source_file_path: &Path,
     destination_file_path: &Path,
     key: &[u8; 32],
@@ -95,7 +95,7 @@ pub fn aead_encrypt_file(
     result
 }
 
-pub fn aead_decrypt_file(
+pub(crate) fn aead_decrypt_file(
     source_file_path: &Path,
     destination_file_path: &Path,
     key: &[u8; 32],
@@ -154,7 +154,7 @@ pub fn aead_decrypt_file(
     }
 }
 
-pub fn encrypt_string(
+pub(crate) fn encrypt_string(
     source: &str,
     key: &[u8; 32],
     full_nonce_bytes: &[u8; 12],
@@ -166,7 +166,7 @@ pub fn encrypt_string(
     (source_data, tag)
 }
 
-pub fn decrypt_string(
+pub(crate) fn decrypt_string(
     ciphertext: &[u8],
     key: &[u8; 32],
     full_nonce_bytes: &[u8; 12],
@@ -189,7 +189,7 @@ pub fn decrypt_string(
     }
 }
 
-pub fn encrypt_sym_key(
+pub(crate) fn encrypt_sym_key(
     asym_pub_key: &BoxedRsaPublicKey,
     sym_key: &[u8; 32],
 ) -> anyhow::Result<Vec<u8>> {

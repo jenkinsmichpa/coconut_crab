@@ -1,5 +1,5 @@
 [package]
-name = "group_docx_tool"
+name = "group-docx-tool"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

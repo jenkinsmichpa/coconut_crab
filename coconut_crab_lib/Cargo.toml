@@ -1,5 +1,5 @@
 [package]
-name = "coconut_crab_lib"
+name = "coconut-crab-lib"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

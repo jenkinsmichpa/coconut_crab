@@ -14,7 +14,7 @@ use crate::client::recv_path;
 
 const SHRED_BUFFER_SIZE: usize = 1024 * 1024;
 
-pub fn shred(receiver: Receiver<Arc<PathBuf>>) -> io::Result<JoinHandle<()>> {
+pub(crate) fn shred(receiver: Receiver<Arc<PathBuf>>) -> io::Result<JoinHandle<()>> {
     debug!("Starting shredder thread");
     thread::Builder::new().spawn(move || {
         let mut rng_cheap = SmallRng::from_rng(&mut rand::rng());

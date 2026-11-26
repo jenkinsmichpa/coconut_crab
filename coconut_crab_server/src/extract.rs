@@ -18,7 +18,7 @@ use tracing::{debug, info, warn};
 use crate::config;
 
 #[derive(Debug)]
-pub enum ApiError {
+pub(crate) enum ApiError {
     InvalidJson,
     InvalidId,
     InvalidHostname,
@@ -58,9 +58,9 @@ impl IntoResponse for ApiError {
 }
 
 #[derive(Debug)]
-pub struct Validated<T>(pub T);
+pub(crate) struct Validated<T>(pub T);
 
-pub trait Provable: DeserializeOwned + Send {
+pub(crate) trait Provable: DeserializeOwned + Send {
     const LABEL: &'static str;
     fn id(&self) -> &VictimId;
     fn proof(&self) -> &Proof;

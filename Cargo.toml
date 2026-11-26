@@ -23,24 +23,46 @@ keywords = [
 ]
 categories = ["simulation", "security"]
 
-[workspace.lints.rust]
-unsafe_code = "deny"
-
 [workspace.lints.cargo]
 unused_dependencies = "warn"
 unused_workspace_dependencies = "warn"
+non_kebab_case_bins = "warn"
+non_kebab_case_packages = "warn"
+non_kebab_case_features = "warn"
+non_snake_case_features = "warn"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+single_use_lifetimes = "warn"
+trivial_numeric_casts = "warn"
+unreachable_pub = "warn"
+unused_lifetimes = "warn"
+unused_qualifications = "warn"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "warn"
 
 [workspace.lints.clippy]
 correctness = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
 perf = { level = "warn", priority = -1 }
 complexity = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 style = { level = "warn", priority = -1 }
-suspicious = { level = "warn", priority = -1 }
+redundant_pub_crate = "allow" # Conflicts with `unreachable_pub`
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+missing_safety_doc = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+wildcard_imports = "warn"
+multiple_unsafe_ops_per_block = "warn"
 
 [workspace.dependencies]
-coconut_crab_lib = { path = "coconut_crab_lib" }
+coconut-crab-lib = { path = "coconut_crab_lib" }
 
 ahash = "0.8.12"
 anyhow = "1.0.104"

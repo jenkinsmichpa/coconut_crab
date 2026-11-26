@@ -25,7 +25,7 @@ use crate::{
     walker::{random_walk_with_exts, walk_with_exts},
 };
 
-pub struct EncryptionPipeline<'a> {
+pub(crate) struct EncryptionPipeline<'a> {
     pub status: &'a mut Status,
     pub sym_key: &'a Arc<Zeroizing<[u8; 32]>>,
     pub exe_path_dir: &'a Arc<PathBuf>,
@@ -66,8 +66,11 @@ fn spawn_shred_stage(
 }
 
 #[tracing::instrument(skip_all)]
-#[allow(clippy::needless_pass_by_value)]
-pub fn run_encryption_pipeline(cfg: EncryptionPipeline<'_>) -> anyhow::Result<()> {
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "pipeline takes ownership of its per-run configuration"
+)]
+pub(crate) fn run_encryption_pipeline(cfg: EncryptionPipeline<'_>) -> anyhow::Result<()> {
     debug!("Starting encryption process");
 
     cfg.status.state = EncryptionState::Started;
@@ -203,7 +206,7 @@ fn apply_throttle() {
     thread::sleep(time::Duration::from_secs(secs));
 }
 
-pub fn encrypt(
+pub(crate) fn encrypt(
     receiver: Receiver<Arc<PathBuf>>,
     sender: Sender<Arc<PathBuf>>,
     key: Arc<Zeroizing<[u8; 32]>>,

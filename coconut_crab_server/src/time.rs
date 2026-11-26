@@ -4,7 +4,7 @@ use tracing::{debug, error};
 
 use crate::config;
 
-pub fn epoch_time() -> Option<i64> {
+pub(crate) fn epoch_time() -> Option<i64> {
     match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
         Ok(time) => {
             debug!(?time, "Reported time");
@@ -17,7 +17,7 @@ pub fn epoch_time() -> Option<i64> {
     }
 }
 
-pub fn is_recovery_valid(upload_time: Option<i64>, complete: bool) -> bool {
+pub(crate) fn is_recovery_valid(upload_time: Option<i64>, complete: bool) -> bool {
     if complete {
         return false;
     }

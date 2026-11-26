@@ -8,7 +8,7 @@ use crate::extract::ApiError;
 
 const CODE_LEN: usize = 19;
 
-pub fn generate_code() -> String {
+pub(crate) fn generate_code() -> String {
     let code = loop {
         let raw: String = rand::rng()
             .sample_iter(&Alphanumeric)
@@ -31,7 +31,7 @@ pub fn generate_code() -> String {
     code
 }
 
-pub fn decrypt_key(private_key: &BoxedRsaPrivateKey, key: &str) -> Result<String, ApiError> {
+pub(crate) fn decrypt_key(private_key: &BoxedRsaPrivateKey, key: &str) -> Result<String, ApiError> {
     let key_vec = decode(key).map_err(|error| {
         error!(error = ?error, "Failed to decode key");
         ApiError::InvalidKey

@@ -15,7 +15,7 @@ use crate::{
     status::{Status, create_status, export_status_csv, import_status_csv},
 };
 
-pub fn initialize_client(
+pub(crate) fn initialize_client(
     exe_path_dir: &Path,
     conn: &ServerConn,
     preshared_secret: &str,
@@ -35,7 +35,7 @@ pub fn initialize_client(
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct ThreadCounts {
+pub(crate) struct ThreadCounts {
     pub walk: usize,
     pub shred: usize,
     pub encrypt: usize,
@@ -43,7 +43,7 @@ pub struct ThreadCounts {
     pub canary: usize,
 }
 
-pub fn thread_counts() -> ThreadCounts {
+pub(crate) fn thread_counts() -> ThreadCounts {
     let thread_count = match available_parallelism() {
         Ok(suggested) => {
             debug!(suggested, "Successfully got suggested number of threads");
@@ -94,11 +94,11 @@ pub fn thread_counts() -> ThreadCounts {
     }
 }
 
-pub fn channel_capacity(consumers: usize) -> usize {
+pub(crate) fn channel_capacity(consumers: usize) -> usize {
     (consumers * 2).max(64)
 }
 
-pub fn recv_path(receiver: &Receiver<Arc<PathBuf>>) -> Option<Arc<PathBuf>> {
+pub(crate) fn recv_path(receiver: &Receiver<Arc<PathBuf>>) -> Option<Arc<PathBuf>> {
     match receiver.recv() {
         Ok(path) => {
             debug!(path = %path.display(), "Received file path over channel");

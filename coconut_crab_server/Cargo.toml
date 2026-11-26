@@ -1,5 +1,5 @@
 [package]
-name = "coconut_crab_server"
+name = "coconut-crab-server"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,7 +12,7 @@ categories.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-coconut_crab_lib = { workspace = true }
+coconut-crab-lib = { workspace = true }
 serde = { workspace = true }
 axum = { workspace = true, features = ["json", "tokio"] }
 axum-embed = { workspace = true }

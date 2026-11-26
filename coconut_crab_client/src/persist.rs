@@ -38,7 +38,7 @@ fn check_enabled(
     }
 }
 
-pub fn start_persist() -> anyhow::Result<()> {
+pub(crate) fn start_persist() -> anyhow::Result<()> {
     let autolaunch = build_autolaunch()?;
     debug!("Successfully got AutoLaunch");
 
@@ -46,7 +46,7 @@ pub fn start_persist() -> anyhow::Result<()> {
     check_enabled(&autolaunch, true, "enable", "enabled")
 }
 
-pub fn stop_persist() -> anyhow::Result<()> {
+pub(crate) fn stop_persist() -> anyhow::Result<()> {
     let autolaunch = build_autolaunch()?;
     debug!("Successfully got AutoLaunch");
 

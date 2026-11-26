@@ -1,4 +1,8 @@
-#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
+#![allow(
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    reason = "wire helpers document outcomes on their public types"
+)]
 
 pub mod types {
     macro_rules! wire_string_newtype {
@@ -384,7 +388,7 @@ mod ureq_client {
         }
     }
 
-    pub fn web_get_recv_bytes_ureq(agent: &Agent, url: &str) -> Result<Vec<u8>, Error> {
+    pub(crate) fn web_get_recv_bytes_ureq(agent: &Agent, url: &str) -> Result<Vec<u8>, Error> {
         retry_with_backoff("GET", || {
             let response = agent.get(url).call()?;
             debug!(?response, "Received server response to GET");
@@ -397,7 +401,7 @@ mod ureq_client {
         })
     }
 
-    pub fn web_post_send_json_recv_text_ureq<T: Serialize>(
+    pub(crate) fn web_post_send_json_recv_text_ureq<T: Serialize>(
         agent: &Agent,
         url: &str,
         json: &T,

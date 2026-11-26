@@ -377,7 +377,10 @@ fn spawn_coordinator(
         .spawn(move || body(allow_owned, block_owned))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "walk coordinator threads pass their shared walk state explicitly"
+)]
 fn run_root(
     starting_path: &Path,
     threads: usize,
@@ -488,7 +491,7 @@ fn shuffle_and_send_path(sender: &Sender<Arc<PathBuf>>, mut paths: Vec<PathBuf>)
     }
 }
 
-pub fn walk_with_exts(
+pub(crate) fn walk_with_exts(
     sender: Sender<Arc<PathBuf>>,
     allow_exts: Option<&[String]>,
     block_exts: Option<&[String]>,
@@ -549,7 +552,7 @@ pub fn walk_with_exts(
     )
 }
 
-pub fn random_walk_with_exts(
+pub(crate) fn random_walk_with_exts(
     sender: Sender<Arc<PathBuf>>,
     allow_exts: Option<&[String]>,
     block_exts: Option<&[String]>,

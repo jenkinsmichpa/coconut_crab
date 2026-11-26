@@ -1,5 +1,5 @@
 [package]
-name = "coconut_crab_client"
+name = "coconut-crab-client"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,12 +13,12 @@ categories.workspace = true
 
 [package.metadata.winresource]
 ProductName = "Coconut Crab"
-OriginalFilename = "coconut_crab_client.exe"
+OriginalFilename = "coconut-crab-client.exe"
 FileDescription = "Mary-Kate and Ashley"
 LegalCopyright = "jenkinsmichpa"
 
 [dependencies]
-coconut_crab_lib = { workspace = true }
+coconut-crab-lib = { workspace = true }
 ahash = { workspace = true }
 anyhow = { workspace = true }
 auto-launch = { workspace = true }

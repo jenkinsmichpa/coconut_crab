@@ -18,7 +18,7 @@ use crate::{
 };
 
 #[tracing::instrument(skip_all, fields(id = %registration.id))]
-pub async fn register(
+pub(crate) async fn register(
     State(state): State<AppState>,
     Validated(registration): Validated<Registration>,
 ) -> Result<&'static str, ApiError> {
@@ -65,7 +65,7 @@ fn db_lookup_error(action: &str, error: &toasty::Error) -> ApiError {
 }
 
 #[tracing::instrument(skip_all, fields(id = %upload_sym_key.id))]
-pub async fn upload_sym_key(
+pub(crate) async fn upload_sym_key(
     State(state): State<AppState>,
     Validated(upload_sym_key): Validated<UploadSymKey>,
 ) -> Result<&'static str, ApiError> {
@@ -104,7 +104,7 @@ pub async fn upload_sym_key(
 }
 
 #[tracing::instrument(skip_all, fields(id = %announce_completion.id))]
-pub async fn announce_completion(
+pub(crate) async fn announce_completion(
     State(state): State<AppState>,
     Validated(announce_completion): Validated<AnnounceCompletion>,
 ) -> Result<&'static str, ApiError> {
@@ -131,7 +131,7 @@ pub async fn announce_completion(
 }
 
 #[tracing::instrument(skip_all, fields(id = %download_sym_key.id))]
-pub async fn download_sym_key(
+pub(crate) async fn download_sym_key(
     State(state): State<AppState>,
     Validated(download_sym_key): Validated<DownloadSymKey>,
 ) -> Result<String, ApiError> {

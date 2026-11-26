@@ -16,7 +16,7 @@ use rust_embed::RustEmbed;
 #[include = "favicon.png"]
 struct AssetImg;
 
-pub fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ImageError> {
+pub(crate) fn img_from_bytes(bytes: &[u8]) -> Result<DynamicImage, ImageError> {
     let mut reader = ImageReader::new(Cursor::new(bytes));
     let mut limits = Limits::no_limits();
     limits.max_alloc = Some(MAX_DECODED_IMAGE_BYTES);
@@ -52,7 +52,7 @@ fn save_icon_to_disk(file_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn set_icon_wallpaper() {
+pub(crate) fn set_icon_wallpaper() {
     let Ok(exe_dir) = current_exe_dir() else {
         error!("Cannot determine executable directory, skipping wallpaper");
         return;

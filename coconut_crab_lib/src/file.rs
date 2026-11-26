@@ -1,4 +1,7 @@
-#![allow(clippy::missing_errors_doc)]
+#![allow(
+    clippy::missing_errors_doc,
+    reason = "internal helpers document outcomes in their module"
+)]
 
 use std::{
     env::current_exe,
