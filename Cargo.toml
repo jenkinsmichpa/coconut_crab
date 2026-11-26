@@ -29,7 +29,6 @@ unused_workspace_dependencies = "warn"
 non_kebab_case_bins = "warn"
 non_kebab_case_packages = "warn"
 non_kebab_case_features = "warn"
-non_snake_case_features = "warn"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
